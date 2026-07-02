@@ -33,12 +33,14 @@ jobs:
       - name: Actualizar y construir
         env:
           MP_TICKET: ${{ secrets.MP_TICKET }}   # define este secreto en Settings > Secrets
+          PYTHONUNBUFFERED: "1"                  # muestra el progreso en vivo en el log
         run: |
-          # los lunes escanea 30 dias buscando proveedores candidatos; el resto, solo actualiza
+          # avanza como máximo 45 días por corrida (guarda al final y retoma en la siguiente).
+          # los lunes también trae candidatos y licitaciones.
           if [ "$(date -u +%u)" = "1" ]; then
-            python pipeline.py run --sugerencias 30
+            python pipeline.py run --tramo 45 --sugerencias 30 --licitaciones 30
           else
-            python pipeline.py run
+            python pipeline.py run --tramo 45
           fi
 
       - name: Guardar estado en el repositorio

@@ -424,11 +424,52 @@ def cmd_build(args):
 
 # ------------------------------------------------------------------ PROBE
 def cmd_probe(args):
+    import mp_api
     from mp_api import MPClient
     cli = MPClient()
-    det = cli.oc_detalle(args.codigo)
-    print(json.dumps(det, ensure_ascii=False, indent=2)[:6000])
-    print("\n--- Revisa que estas claves existan y ajusta mp_api.extraer_campos() si difieren ---")
+
+    # modo 1: detalle de una OC (comportamiento original)
+    if args.codigo:
+        det = cli.oc_detalle(args.codigo)
+        print(json.dumps(det, ensure_ascii=False, indent=2)[:6000])
+        print("\n--- Revisa que estas claves existan y ajusta mp_api.extraer_campos() si difieren ---")
+        return
+
+    # modo 2: diagnóstico de la consulta diaria por proveedor
+    dia = dt.date.fromisoformat(args.dia) if args.dia else dt.date.today() - dt.timedelta(days=7)
+    f = dia.strftime("%d%m%Y")
+    cod = args.codigo_proveedor
+    if not cod:
+        provs = [r for r in csv.DictReader(open(PROVIDERS, encoding="utf-8")) if r.get("codigo_proveedor")]
+        cod = provs[0]["codigo_proveedor"] if provs else None
+    ep = f"{mp_api.BASE}/ordenesdecompra.json"
+    print(f"== Diagnóstico API · día {dia} (fecha={f}) · proveedor {cod} ==\n", flush=True)
+
+    d1 = cli._get(cli._url(ep, fecha=f, CodigoProveedor=str(cod)))
+    l1 = d1.get("Listado") or []
+    print(f"[A] fecha={f} & CodigoProveedor={cod}")
+    print("    claves:", list(d1.keys()), "| Cantidad:", d1.get("Cantidad"), "| len(Listado):", len(l1), flush=True)
+
+    d2 = cli._get(cli._url(ep, fecha=f))
+    l2 = d2.get("Listado") or []
+    print(f"\n[B] fecha={f}  (todas las OC del país ese día)")
+    print("    Cantidad:", d2.get("Cantidad"), "| len(Listado):", len(l2))
+    if l2:
+        print("    campos de un registro:", list(l2[0].keys()), flush=True)
+
+    d3 = cli._get(cli._url(ep, CodigoProveedor=str(cod)))
+    l3 = d3.get("Listado") or []
+    print(f"\n[C] CodigoProveedor={cod}  (sin fecha)")
+    print("    Cantidad:", d3.get("Cantidad"), "| len(Listado):", len(l3), flush=True)
+
+    print("\n--- Interpretación ---")
+    if not l1 and l2:
+        print("La combinación fecha+CodigoProveedor NO trae datos, pero fecha sola sí.")
+        print("=> Hay que consultar por día [B] y filtrar por proveedor, o usar [C] sin fecha.")
+    elif not l1 and not l2:
+        print("Ni por proveedor ni por día hay datos: revisa el ticket, la fecha o el endpoint.")
+    else:
+        print("La consulta [A] sí trae datos; el problema estaría en el parseo, no en la consulta.")
 
 
 def cmd_run(args):
@@ -455,7 +496,10 @@ def main():
     ca.add_argument("--dias", type=int, default=30); ca.set_defaults(func=cmd_candidates)
     li = sub.add_parser("licitaciones"); li.add_argument("--desde"); li.add_argument("--hasta")
     li.add_argument("--dias", type=int, default=30); li.set_defaults(func=cmd_licitaciones)
-    pr = sub.add_parser("probe"); pr.add_argument("codigo"); pr.set_defaults(func=cmd_probe)
+    pr = sub.add_parser("probe")
+    pr.add_argument("codigo", nargs="?", default=None)
+    pr.add_argument("--dia"); pr.add_argument("--codigo-proveedor", dest="codigo_proveedor")
+    pr.set_defaults(func=cmd_probe)
     r = sub.add_parser("run"); r.add_argument("--desde"); r.add_argument("--hasta")
     r.add_argument("--dias", type=int, default=14); r.add_argument("--tramo", type=int, default=0)
     r.add_argument("--sugerencias", type=int, default=0,

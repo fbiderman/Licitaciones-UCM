@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tubería de actualización del panel de Traslados (Mercado Público).
-
+ 
 Subcomandos:
   seed     Carga el histórico desde el Excel a la base local (una sola vez).
   resolve  Resuelve el CodigoProveedor de cada RUT vía API (se cachea en providers.csv).
@@ -8,21 +8,21 @@ Subcomandos:
   build    Regenera dashboard.html a partir de la base local.
   probe    Vuelca el JSON crudo de una OC para verificar el mapeo de campos.
   run      resolve -> update -> build (lo que se agenda a diario).
-
+ 
 Requiere la variable de entorno MP_TICKET (excepto para seed/build).
 """
 from __future__ import annotations
 import argparse, csv, datetime as dt, json, os, sqlite3, sys, unicodedata
-
+ 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(HERE, "mp_traslados.db")
 PROVIDERS = os.path.join(HERE, "providers.csv")
 TEMPLATE = os.path.join(HERE, "dashboard_template.html")
 OUT_HTML = os.path.join(HERE, "dashboard.html")
-
+ 
 REGIONES_CHILE = {  # fallback región -> se completa desde el Excel al sembrar
 }
-
+ 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS oc (
   codigo TEXT PRIMARY KEY, nombre TEXT, comprador TEXT, rut_comprador TEXT,
@@ -37,19 +37,19 @@ CREATE TABLE IF NOT EXISTS candidates (
   rut TEXT PRIMARY KEY, nombre TEXT, oc INTEGER, monto REAL, ultima TEXT, primera TEXT
 );
 """
-
-
+ 
+ 
 def conn():
     c = sqlite3.connect(DB)
     c.executescript(SCHEMA)
     return c
-
-
+ 
+ 
 def _norm(s: str) -> str:
     s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
     return " ".join(s.upper().split())
-
-
+ 
+ 
 # ------------------------------------------------------------------ SEED
 def cmd_seed(args):
     import pandas as pd
@@ -61,7 +61,7 @@ def cmd_seed(args):
         return
     if args.force:
         c.execute("DELETE FROM oc")
-
+ 
     df = pd.read_excel(xls, sheet_name="Datos")
     df["conversion_rate"] = df["ConversionRate"].fillna(1.0)
     rows = []
@@ -74,7 +74,7 @@ def cmd_seed(args):
                      float(r["conversion_rate"]), float(r["MontoOC_BRUTO"]),
                      str(r["TipoOrden"]).strip(), anio, mes, str(r["Region"]).strip()))
     c.executemany("INSERT OR REPLACE INTO oc VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
-
+ 
     # mapa comprador -> región (hoja Regiones)
     try:
         raw = pd.read_excel(xls, sheet_name="Regiones", header=None)
@@ -90,37 +90,47 @@ def cmd_seed(args):
     # también deriva el mapa desde los propios datos
     for comp, region in c.execute("SELECT comprador, region FROM oc GROUP BY comprador").fetchall():
         c.execute("INSERT OR IGNORE INTO region_map VALUES (?,?)", (_norm(comp), region))
-
+ 
     c.execute("INSERT OR REPLACE INTO meta VALUES ('snapshot', ?)", (args.snapshot,))
     c.commit()
     n = c.execute("SELECT COUNT(*) FROM oc").fetchone()[0]
     mx = c.execute("SELECT MAX(fecha) FROM oc").fetchone()[0]
     print(f"Sembradas {n} OC. Última fecha en base: {mx}")
-
-
+ 
+ 
 # ------------------------------------------------------------------ RESOLVE
 def cmd_resolve(args):
     from mp_api import MPClient
     cli = MPClient()
     filas = list(csv.DictReader(open(PROVIDERS, encoding="utf-8")))
     cambios = 0
+ 
+    def guardar():
+        with open(PROVIDERS, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=["alias", "rut", "codigo_proveedor"])
+            w.writeheader(); w.writerows(filas)
+ 
     for row in filas:
         if row.get("codigo_proveedor"):
             continue
-        emp = cli.buscar_proveedor(row["rut"])
+        try:
+            emp = cli.buscar_proveedor(row["rut"])
+        except Exception as e:  # noqa: BLE001  — un 500 puntual no debe abortar todo
+            print(f"  {row['rut']:>12}  ->  ERROR ({row['alias']}): {e}")
+            continue
         cod = (emp or {}).get("CodigoEmpresa") or (emp or {}).get("codigoEmpresa")
         if cod:
             row["codigo_proveedor"] = str(cod); cambios += 1
             print(f"  {row['rut']:>12}  ->  {cod}  ({row['alias']})")
+            if cambios % 10 == 0:
+                guardar()  # persiste avance por si algo falla más adelante
         else:
             print(f"  {row['rut']:>12}  ->  SIN RESULTADO ({row['alias']})")
-    with open(PROVIDERS, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["alias", "rut", "codigo_proveedor"])
-        w.writeheader(); w.writerows(filas)
+    guardar()
     print(f"Resueltos {cambios} códigos nuevos. Total con código: "
           f"{sum(1 for r in filas if r['codigo_proveedor'])}/{len(filas)}")
-
-
+ 
+ 
 # ------------------------------------------------------------------ UPDATE
 def _fx_rate(c, moneda: str, fecha_iso: str) -> float:
     """CLP por unidad de moneda en la fecha. CLP=1. Cachea en la tabla fx."""
@@ -138,13 +148,13 @@ def _fx_rate(c, moneda: str, fecha_iso: str) -> float:
         return float(val)
     print(f"  ! sin tipo de cambio {ind} para {dkey}; se usa 1.0")
     return 1.0
-
-
+ 
+ 
 def _region_de(c, comprador: str) -> str:
     r = c.execute("SELECT region FROM region_map WHERE comprador=?", (_norm(comprador),)).fetchone()
     return r[0] if r else "Sin Region"
-
-
+ 
+ 
 def cmd_update(args):
     from mp_api import MPClient, extraer_campos
     cli = MPClient()
@@ -152,7 +162,7 @@ def cmd_update(args):
     provs = [r for r in csv.DictReader(open(PROVIDERS, encoding="utf-8")) if r.get("codigo_proveedor")]
     if not provs:
         print("No hay proveedores con código. Ejecuta primero: resolve"); return
-
+ 
     last = c.execute("SELECT MAX(fecha) FROM oc").fetchone()[0]
     desde = dt.date.fromisoformat(str(last)[:10]) + dt.timedelta(days=1) if last else \
         dt.date.today() - dt.timedelta(days=args.dias)
@@ -160,7 +170,7 @@ def cmd_update(args):
         desde = dt.date.fromisoformat(args.desde)
     hasta = dt.date.fromisoformat(args.hasta) if args.hasta else dt.date.today()
     print(f"Actualizando {desde} -> {hasta} para {len(provs)} proveedores…")
-
+ 
     nuevas = 0
     dia = desde
     while dia <= hasta:
@@ -176,7 +186,10 @@ def cmd_update(args):
                     continue
                 if c.execute("SELECT 1 FROM oc WHERE codigo=?", (cod,)).fetchone():
                     continue
-                det = cli.oc_detalle(cod)
+                try:
+                    det = cli.oc_detalle(cod)
+                except Exception as e:  # noqa: BLE001
+                    print(f"  ! detalle {cod}: {e}"); continue
                 if not det:
                     continue
                 f = extraer_campos(det)
@@ -198,8 +211,8 @@ def cmd_update(args):
         dia += dt.timedelta(days=1)
     c.commit()
     print(f"Listo. {nuevas} OC nuevas incorporadas.")
-
-
+ 
+ 
 # ------------------------------------------------------------------ CANDIDATES
 def cmd_candidates(args):
     """Escanea la lista diaria nacional de OC, filtra por nombre de 'traslados' y
@@ -209,11 +222,11 @@ def cmd_candidates(args):
     c = conn()
     roster = {r["rut"].replace(".", "").upper()
               for r in csv.DictReader(open(PROVIDERS, encoding="utf-8")) if r.get("rut")}
-
+ 
     hasta = dt.date.fromisoformat(args.hasta) if args.hasta else dt.date.today()
     desde = dt.date.fromisoformat(args.desde) if args.desde else hasta - dt.timedelta(days=args.dias)
     print(f"Buscando proveedores de traslados fuera de la nómina {desde} -> {hasta}…")
-
+ 
     vistos = 0
     dia = desde
     while dia <= hasta:
@@ -227,7 +240,10 @@ def cmd_candidates(args):
             if not es_traslado(nombre):
                 continue
             cod = item.get("Codigo") or item.get("codigo")
-            det = cli.oc_detalle(cod) if cod else None
+            try:
+                det = cli.oc_detalle(cod) if cod else None
+            except Exception as e:  # noqa: BLE001
+                print(f"  ! detalle {cod}: {e}"); continue
             if not det:
                 continue
             f = extraer_campos(det)
@@ -250,8 +266,8 @@ def cmd_candidates(args):
         dia += dt.timedelta(days=1)
     n = c.execute("SELECT COUNT(*) FROM candidates").fetchone()[0]
     print(f"Listo. {vistos} OC de traslados agregadas a {n} proveedores candidatos.")
-
-
+ 
+ 
 # ------------------------------------------------------------------ BUILD
 def cmd_build(args):
     c = conn()
@@ -270,11 +286,11 @@ def cmd_build(args):
     inv = lambda d: [k for k, _ in sorted(d.items(), key=lambda kv: kv[1])]
     snap = (c.execute("SELECT valor FROM meta WHERE clave='snapshot'").fetchone() or
             [dt.date.today().isoformat()])[0]
-
+ 
     # nómina actual (para regenerar providers.csv desde el panel)
     roster = [[r["alias"], r["rut"]] for r in csv.DictReader(open(PROVIDERS, encoding="utf-8"))]
     roster_ruts = {r[1].replace(".", "").upper() for r in roster}
-
+ 
     # proveedores sugeridos (fuera de la nómina), ordenados por monto
     cand = []
     for rut, nombre, oc, monto, ultima, primera in c.execute(
@@ -283,7 +299,7 @@ def cmd_build(args):
             continue
         cand.append({"rut": rut, "nombre": nombre, "oc": oc,
                      "monto": round(monto or 0), "ultima": ultima, "primera": primera})
-
+ 
     # tipo de cambio aplicado (últimos valores) + conteo de OC en UF/UTM
     def last_fx(ind):
         r = c.execute("SELECT fecha,valor FROM fx WHERE indicador=? ORDER BY fecha DESC LIMIT 1",
@@ -298,7 +314,7 @@ def cmd_build(args):
     n_uf = c.execute("SELECT COUNT(*) FROM oc WHERE UPPER(moneda) IN ('CLF','UF')").fetchone()[0]
     n_utm = c.execute("SELECT COUNT(*) FROM oc WHERE UPPER(moneda)='UTM'").fetchone()[0]
     fx = {"uf": last_fx("uf"), "utm": last_fx("utm"), "n_uf": n_uf, "n_utm": n_utm}
-
+ 
     data = {"meta": {"source": "Mercado Publico - Traslados", "snapshot": snap,
                      "rows": len(out), "total_clp": int(total), "fx": fx},
             "prov": inv(prov), "comp": inv(comp), "reg": inv(reg),
@@ -312,8 +328,8 @@ def cmd_build(args):
     os.makedirs(os.path.join(HERE, "site"), exist_ok=True)
     open(os.path.join(HERE, "site", "index.html"), "w", encoding="utf-8").write(html)
     print(f"dashboard.html generado: {len(out)} OC, total MM$ {total/1e6:,.0f}")
-
-
+ 
+ 
 # ------------------------------------------------------------------ PROBE
 def cmd_probe(args):
     from mp_api import MPClient
@@ -321,16 +337,16 @@ def cmd_probe(args):
     det = cli.oc_detalle(args.codigo)
     print(json.dumps(det, ensure_ascii=False, indent=2)[:6000])
     print("\n--- Revisa que estas claves existan y ajusta mp_api.extraer_campos() si difieren ---")
-
-
+ 
+ 
 def cmd_run(args):
     cmd_resolve(args); cmd_update(args)
     if getattr(args, "sugerencias", 0):
         ca = argparse.Namespace(desde=None, hasta=None, dias=args.sugerencias)
         cmd_candidates(ca)
     cmd_build(args)
-
-
+ 
+ 
 def main():
     ap = argparse.ArgumentParser(description="Tubería del panel de Traslados")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -355,7 +371,7 @@ def main():
     except RuntimeError as e:
         print("Error:", e); return 1
     return 0
-
-
+ 
+ 
 if __name__ == "__main__":
     sys.exit(main())

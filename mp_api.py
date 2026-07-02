@@ -19,8 +19,8 @@ BASE_EMP = "https://api.mercadopublico.cl/servicios/v1/Publico/Empresas"
 
 
 class MPClient:
-    def __init__(self, ticket: str | None = None, min_interval: float = 0.4,
-                 max_retries: int = 4, timeout: int = 40):
+    def __init__(self, ticket: str | None = None, min_interval: float = 0.3,
+                 max_retries: int = 2, timeout: int = 25):
         self.ticket = ticket or os.environ.get("MP_TICKET")
         if not self.ticket:
             raise RuntimeError("Falta el ticket. Define la variable de entorno MP_TICKET.")
@@ -45,7 +45,7 @@ class MPClient:
                 self._last = time.time()
                 if intento == self.max_retries:
                     raise
-                time.sleep(min(2 ** intento, 15))  # backoff exponencial
+                time.sleep(min(2 * intento, 4))    # backoff acotado
         return {}
 
     def _url(self, endpoint: str, **params) -> str:
@@ -80,6 +80,17 @@ class MPClient:
         url = self._url(f"{BASE}/ordenesdecompra.json", codigo=codigo_oc)
         data = self._get(url)
         listado = data.get("Listado") or []
+        return listado[0] if listado else None
+
+    # ---- licitaciones ----
+    def licitaciones_por_proveedor_dia(self, codigo_proveedor: str | int, fecha_ddmmaaaa: str) -> list[dict]:
+        url = self._url(f"{BASE}/licitaciones.json",
+                        fecha=fecha_ddmmaaaa, CodigoProveedor=str(codigo_proveedor))
+        return (self._get(url) or {}).get("Listado") or []
+
+    def licitacion_detalle(self, codigo_lic: str) -> dict | None:
+        url = self._url(f"{BASE}/licitaciones.json", codigo=codigo_lic)
+        listado = (self._get(url) or {}).get("Listado") or []
         return listado[0] if listado else None
 
 
@@ -141,6 +152,32 @@ def extraer_campos(oc: dict) -> dict:
         "moneda": str(moneda).upper(),
         "monto_bruto": float(total),
         "tipo_orden": _first(oc, "Tipo", "tipo", "TipoDespachoOC", default="") or "Sin Clasificacion",
+    }
+
+
+# estados de licitación -> texto
+ESTADO_LIC = {5: "Publicada", 6: "Cerrada", 7: "Desierta", 8: "Adjudicada",
+              18: "Readjudicada", 19: "Suspendida", 4: "Revocada"}
+
+
+def extraer_licitacion(lic: dict) -> dict:
+    """Normaliza el detalle de una licitación. Verifica claves con `probe` si difieren."""
+    comprador = _first(lic, "Comprador", default={}) or {}
+    fechas = _first(lic, "Fechas", default={}) or {}
+    cod_estado = _first(lic, "CodigoEstado", "codigoEstado")
+    estado = ESTADO_LIC.get(cod_estado) or _first(lic, "Estado", "estado", default="")
+    fecha = _first(fechas, "FechaPublicacion", "FechaCreacion", "FechaCierre") \
+        or _first(lic, "FechaPublicacion", "FechaCreacion", default="")
+    return {
+        "codigo": _first(lic, "CodigoExterno", "Codigo", "codigo", default=""),
+        "nombre": _first(lic, "Nombre", "nombre", default=""),
+        "comprador": _first(comprador, "NombreOrganismo", "Nombre", default=""),
+        "estado": estado,
+        "fecha": str(fecha),
+        "tipo": _first(lic, "Tipo", "tipo", default="") or "Sin Tipo",
+        "moneda": str(_first(lic, "Moneda", "TipoMoneda", default="CLP")).upper(),
+        "monto_estimado": float(_first(lic, "MontoEstimado", "Estimacion", "montoEstimado", default=0) or 0),
+        "adjudicada": 1 if str(estado).lower().startswith("adjud") else 0,
     }
 
 

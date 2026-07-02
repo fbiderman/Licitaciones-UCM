@@ -1,0 +1,40 @@
+name: Diagnostico API Traslados
+
+on:
+  workflow_dispatch:
+    inputs:
+      dia:
+        description: "Día a probar (formato AAAA-MM-DD, elige un día hábil)"
+        required: true
+        default: "2025-09-10"
+      codigo_proveedor:
+        description: "Código de proveedor (opcional; si se deja vacío usa el primero de la nómina)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read                # solo lectura: este workflow no guarda ni publica nada
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Probar la API de Mercado Publico
+        env:
+          MP_TICKET: ${{ secrets.MP_TICKET }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          if [ -n "${{ inputs.codigo_proveedor }}" ]; then
+            python pipeline.py probe --dia "${{ inputs.dia }}" --codigo-proveedor "${{ inputs.codigo_proveedor }}"
+          else
+            python pipeline.py probe --dia "${{ inputs.dia }}"
+          fi

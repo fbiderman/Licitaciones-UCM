@@ -1,0 +1,66 @@
+name: Actualizar y publicar panel Traslados
+
+on:
+  schedule:
+    - cron: "30 11 * * *"      # ~08:30 hora de Chile (UTC-3). Ajusta si corresponde.
+  workflow_dispatch: {}         # ejecución manual desde la pestaña Actions
+
+permissions:
+  contents: write               # commitear la base y el HTML actualizados
+  pages: write                  # publicar en GitHub Pages
+  id-token: write               # requerido por deploy-pages
+
+concurrency:                    # evita despliegues solapados
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Sembrar histórico si la base no existe (solo la 1ª vez)
+        run: python pipeline.py seed --excel "$(ls *.xlsx | head -1)" --snapshot 2025-08-19
+
+      - name: Actualizar y construir
+        env:
+          MP_TICKET: ${{ secrets.MP_TICKET }}   # define este secreto en Settings > Secrets
+        run: |
+          # los lunes escanea 30 dias buscando proveedores candidatos; el resto, solo actualiza
+          if [ "$(date -u +%u)" = "1" ]; then
+            python pipeline.py run --sugerencias 30
+          else
+            python pipeline.py run
+          fi
+
+      - name: Guardar estado en el repositorio
+        run: |
+          git config user.name  "traslados-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add mp_traslados.db dashboard.html providers.csv
+          git commit -m "Actualizacion automatica $(date -u +%Y-%m-%d)" || echo "Sin cambios"
+          git push
+
+      - name: Preparar artefacto de Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site           # carpeta con index.html que genera build
+
+  publicar:
+    needs: actualizar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Desplegar en GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

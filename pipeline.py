@@ -448,22 +448,29 @@ def cmd_probe(args):
     d1 = cli._get(cli._url(ep, fecha=f, CodigoProveedor=str(cod)))
     l1 = d1.get("Listado") or []
     print(f"[A] fecha={f} & CodigoProveedor={cod}")
-    print("    claves:", list(d1.keys()), "| Cantidad:", d1.get("Cantidad"), "| len(Listado):", len(l1), flush=True)
+    print("    claves:", list(d1.keys()), "| Cantidad:", d1.get("Cantidad"), "| len(Listado):", len(l1))
+    print("    RESPUESTA CRUDA:", json.dumps(d1, ensure_ascii=False)[:800], flush=True)
 
     d2 = cli._get(cli._url(ep, fecha=f))
     l2 = d2.get("Listado") or []
     print(f"\n[B] fecha={f}  (todas las OC del país ese día)")
     print("    Cantidad:", d2.get("Cantidad"), "| len(Listado):", len(l2))
+    print("    RESPUESTA CRUDA:", json.dumps(d2, ensure_ascii=False)[:800])
     if l2:
         print("    campos de un registro:", list(l2[0].keys()), flush=True)
 
     d3 = cli._get(cli._url(ep, CodigoProveedor=str(cod)))
     l3 = d3.get("Listado") or []
     print(f"\n[C] CodigoProveedor={cod}  (sin fecha)")
-    print("    Cantidad:", d3.get("Cantidad"), "| len(Listado):", len(l3), flush=True)
+    print("    Cantidad:", d3.get("Cantidad"), "| len(Listado):", len(l3))
+    print("    RESPUESTA CRUDA:", json.dumps(d3, ensure_ascii=False)[:800], flush=True)
 
     print("\n--- Interpretación ---")
-    if not l1 and l2:
+    if any(("Mensaje" in d and not (d.get("Listado"))) for d in (d1, d2, d3)):
+        print("La API respondió con un MENSAJE de error (clave 'Mensaje'), no con datos.")
+        print("Lee el texto de 'Mensaje' arriba: suele indicar ticket inválido, límite de")
+        print("consultas superado, o fecha/endpoint fuera de rango.")
+    elif not l1 and l2:
         print("La combinación fecha+CodigoProveedor NO trae datos, pero fecha sola sí.")
         print("=> Hay que consultar por día [B] y filtrar por proveedor, o usar [C] sin fecha.")
     elif not l1 and not l2:

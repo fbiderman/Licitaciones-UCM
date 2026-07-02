@@ -179,15 +179,17 @@ def cmd_update(args):
         hasta = desde + dt.timedelta(days=tramo)  # procesa por tramos, guardando al final de cada uno
     print(f"Actualizando {desde} -> {hasta} para {len(provs)} proveedores…", flush=True)
 
-    nuevas = 0
+    nuevas = 0; ok = 0; err = 0
     dia = desde
     while dia <= hasta:
         fstr = dia.strftime("%d%m%Y")
+        d_ok = 0; d_err = 0
         for p in provs:
             try:
                 listado = cli.oc_por_proveedor_dia(p["codigo_proveedor"], fstr)
-            except Exception as e:  # noqa: BLE001
-                print(f"  ! {fstr} {p['alias']}: {e}"); continue
+                d_ok += 1
+            except Exception:  # noqa: BLE001
+                d_err += 1; continue
             for item in listado:
                 cod = item.get("Codigo") or item.get("codigo")
                 if not cod:
@@ -196,8 +198,8 @@ def cmd_update(args):
                     continue
                 try:
                     det = cli.oc_detalle(cod)
-                except Exception as e:  # noqa: BLE001
-                    print(f"  ! detalle {cod}: {e}"); continue
+                except Exception:  # noqa: BLE001
+                    continue
                 if not det:
                     continue
                 f = extraer_campos(det)
@@ -214,13 +216,19 @@ def cmd_update(args):
                            f["estado"], f["moneda"], cr, f["monto_bruto"], f["tipo_orden"],
                            anio, mes, _region_de(c, f["comprador"])))
                 nuevas += 1
-        if dia.day % 7 == 0 or dia == hasta:
-            c.commit(); print(f"  … {dia}  (+{nuevas} OC nuevas)", flush=True)
+        ok += d_ok; err += d_err
+        c.commit()
+        print(f"  {dia}  ok={d_ok} err={d_err}  (+{nuevas} OC nuevas)", flush=True)
+        # corte temprano: si la API falla en (casi) todas las consultas, no seguir horas
+        if ok == 0 and err >= len(provs):
+            print("  ! La API está devolviendo errores en todas las consultas. "
+                  "Probablemente inestabilidad temporal de Mercado Público; reintenta más tarde.", flush=True)
+            break
         dia += dt.timedelta(days=1)
     c.execute("INSERT OR REPLACE INTO meta VALUES ('last_update', ?)",
               (dt.datetime.now().isoformat(timespec="seconds"),))
     c.commit()
-    print(f"Listo. {nuevas} OC nuevas incorporadas.")
+    print(f"Listo. {nuevas} OC nuevas incorporadas. Consultas ok={ok} err={err}.", flush=True)
 
 
 # ------------------------------------------------------------------ CANDIDATES

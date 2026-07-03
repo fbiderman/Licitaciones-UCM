@@ -638,6 +638,8 @@ def cmd_import_da(args):
             print(f"\n  Fuente: {os.path.basename(str(origen))}")
             print(f"  Separador detectado: '{sep}' · {len(header)} columnas")
             print(f"  Mapeo de columnas: {mapa}", flush=True)
+            if args.dry_run:
+                print(f"  CABECERA COMPLETA: {header}", flush=True)
             faltan = [k for k in ("codigo", "rut_proveedor", "monto", "fecha") if k not in mapa]
             if faltan:
                 print(f"  ! No pude ubicar columnas clave: {faltan}")
@@ -655,6 +657,12 @@ def cmd_import_da(args):
                 if rutp not in ruts:
                     continue
                 coincide += 1
+                if args.dry_run and coincide == 1:
+                    print("\n  EJEMPLO (primera fila de un proveedor tuyo):", flush=True)
+                    for k, v in row.items():
+                        vs = str(v or "").strip()
+                        if vs:
+                            print(f"      {k} = {vs[:60]}", flush=True)
                 cod = str(row.get(mapa["codigo"]) or "").strip()
                 if not cod:
                     continue

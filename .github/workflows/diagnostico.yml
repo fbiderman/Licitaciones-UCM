@@ -5,10 +5,14 @@ on:
     inputs:
       dia:
         description: "Día a probar (formato AAAA-MM-DD, elige un día hábil)"
-        required: true
+        required: false
         default: "2025-09-10"
       codigo_proveedor:
         description: "Código de proveedor (opcional; si se deja vacío usa el primero de la nómina)"
+        required: false
+        default: ""
+      codigo_oc:
+        description: "Código de una ORDEN (ej: 1057503-3276-SE26). Si se completa, vuelca su detalle crudo."
         required: false
         default: ""
 
@@ -33,7 +37,9 @@ jobs:
           MP_TICKET: ${{ secrets.MP_TICKET }}
           PYTHONUNBUFFERED: "1"
         run: |
-          if [ -n "${{ inputs.codigo_proveedor }}" ]; then
+          if [ -n "${{ inputs.codigo_oc }}" ]; then
+            python pipeline.py probe "${{ inputs.codigo_oc }}"
+          elif [ -n "${{ inputs.codigo_proveedor }}" ]; then
             python pipeline.py probe --dia "${{ inputs.dia }}" --codigo-proveedor "${{ inputs.codigo_proveedor }}"
           else
             python pipeline.py probe --dia "${{ inputs.dia }}"

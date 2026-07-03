@@ -18,6 +18,10 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:             # comparte cola con el workflow diario para no chocar al publicar
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   backfill:
     runs-on: ubuntu-latest

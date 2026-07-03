@@ -1,0 +1,71 @@
+name: Backfill Datos Abiertos
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL del CSV/zip/7z de Datos Abiertos (dejar vacío para leer la carpeta datos_abiertos/)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Prueba: solo muestra el mapeo de columnas y cuenta, sin guardar ni publicar"
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write        # para guardar la base actualizada cuando NO es dry-run
+  pages: write
+  id-token: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Importar Datos Abiertos
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          DRY=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
+          if [ -n "${{ inputs.url }}" ]; then
+            python pipeline.py import-da --url "${{ inputs.url }}" $DRY
+          else
+            python pipeline.py import-da --dir datos_abiertos $DRY
+          fi
+
+      - name: Reconstruir el panel
+        if: ${{ inputs.dry_run == false }}
+        run: python pipeline.py build
+
+      - name: Guardar la base en el repositorio
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add mp_traslados.db dashboard.html providers.csv
+          git commit -m "Backfill Datos Abiertos" || echo "Sin cambios"
+          git push
+
+      - name: Configurar Pages
+        if: ${{ inputs.dry_run == false }}
+        uses: actions/configure-pages@v5
+
+      - name: Subir artefacto de Pages
+        if: ${{ inputs.dry_run == false }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Publicar en Pages
+        if: ${{ inputs.dry_run == false }}
+        uses: actions/deploy-pages@v4

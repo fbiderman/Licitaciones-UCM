@@ -801,7 +801,11 @@ def cmd_resolve_da(args):
 
     encontrados = {}  # rut_norm -> Counter de CodigoProveedor
     for origen in origenes:
-        descargado = _origen_a_path(origen)
+        try:
+            descargado = _origen_a_path(origen)
+        except Exception as e:  # noqa: BLE001  — un mes inexistente (404) no debe abortar todo
+            print(f"  ! No se pudo descargar {origen}: {e}", flush=True)
+            continue
         csv_path, temporales = _preparar_csv(descargado)
         enc = _sniff_encoding(csv_path)
         fh = open(csv_path, encoding=enc, errors="replace")

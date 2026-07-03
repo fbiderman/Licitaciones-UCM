@@ -12,7 +12,7 @@ Subcomandos:
 Requiere la variable de entorno MP_TICKET (excepto para seed/build).
 """
 from __future__ import annotations
-import argparse, csv, datetime as dt, gzip, io, json, os, re, sqlite3, sys, tempfile, unicodedata, urllib.request, zipfile
+import argparse, codecs, csv, datetime as dt, gzip, io, json, os, re, shutil, sqlite3, sys, tempfile, unicodedata, urllib.request, zipfile
 csv.field_size_limit(10 * 1024 * 1024)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -497,8 +497,8 @@ def cmd_probe(args):
 _DA_ALIASES = {
     "codigo":        ["Codigo", "CodigoOrdenCompra", "CodigoOC", "IdOrdenCompra", "OrdenDeCompra", "codigoOrdenCompra"],
     "nombre":        ["Nombre", "NombreOC", "NombreOrdenCompra"],
-    "comprador":     ["NombreOrganismo", "Organismo", "NombreUnidadCompra", "UnidadDeCompra", "Institucion",
-                      "NombreInstitucion", "Comprador", "sector", "Sector"],
+    "comprador":     ["OrganismoPublico", "NombreOrganismo", "Organismo", "UnidadCompra", "NombreUnidadCompra",
+                      "UnidadDeCompra", "Institucion", "NombreInstitucion", "Comprador"],
     "rut_comprador": ["RutUnidadCompra", "RutOrganismo", "RutInstitucion", "RutComprador"],
     "fecha":         ["FechaEnvio", "FechaCreacion", "FechaOrdenCompra", "Fecha", "FechaAceptacion", "FechaEnvioOC"],
     "proveedor":     ["NombreProveedor", "RazonSocialProveedor", "RazonSocialSucursal", "Proveedor", "NombreSucursal"],
@@ -564,32 +564,86 @@ def _parse_fecha(v):
     return None
 
 
-def _abrir_texto(path):
-    """Devuelve (file_texto, handle_a_cerrar) descomprimiendo por magia de bytes o extensión."""
+# Regiones: del texto largo del archivo -> forma corta del histórico. Orden importa.
+_REGION_KEYS = [
+    ("aricayparinacota", "Arica"), ("arica", "Arica"),
+    ("tarapaca", "Tarapaca"), ("antofagasta", "Antofagasta"), ("atacama", "Atacama"),
+    ("coquimbo", "Coquimbo"), ("valparaiso", "Valparaiso"), ("metropolitana", "Metropolitana"),
+    ("higgins", "O'Higgins"), ("maule", "Maule"), ("nuble", "Ñuble"),
+    ("biobio", "Bio Bio"), ("araucania", "Araucania"),
+    ("losrios", "Los Rios"), ("loslagos", "Los Lagos"),
+    ("aysen", "Aysen"), ("magallanes", "Magallanes"), ("nacional", "Nacional"),
+]
+
+
+def _region_corta(s):
+    t = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode().lower()
+    t = re.sub(r"[^a-z]", "", t)
+    for key, val in _REGION_KEYS:
+        if key in t:
+            return val
+    return None
+
+
+def _tipo_da(row):
+    def g(k):
+        return str(row.get(k, "") or "").strip().lower()
+    if g("EsTratoDirecto") in ("si", "sí", "1", "true"):
+        return "Trato Directo"
+    if g("EsCompraAgil") in ("si", "sí", "1", "true"):
+        return "Compra Agil"
+    proc = unicodedata.normalize("NFKD", g("ProcedenciaOC")).encode("ascii", "ignore").decode()
+    if "convenio marco" in proc:
+        return "Convenio Marco"
+    if "microcompra" in proc:
+        return "Microcompra"
+    if "licitacion" in proc:
+        return "Licitacion"
+    return "Sin Clasificacion"
+
+
+def _preparar_csv(path):
+    """Descomprime a disco si hace falta y devuelve (ruta_csv, [temporales_a_borrar])."""
     with open(path, "rb") as fh:
         magic = fh.read(6)
     low = path.lower()
     if magic[:2] == b"\x1f\x8b" or low.endswith(".gz"):
-        return io.TextIOWrapper(gzip.open(path, "rb"), encoding="utf-8", errors="replace"), None
+        out = tempfile.mkstemp(suffix=".csv")[1]
+        with gzip.open(path, "rb") as g, open(out, "wb") as o:
+            shutil.copyfileobj(g, o)
+        return out, [out]
     if magic[:2] == b"PK" or low.endswith(".zip"):
         zf = zipfile.ZipFile(path)
         nombre = next((n for n in zf.namelist() if n.lower().endswith(".csv")), zf.namelist()[0])
-        print(f"    (zip) leyendo miembro: {nombre}", flush=True)
-        return io.TextIOWrapper(zf.open(nombre), encoding="utf-8", errors="replace"), zf
+        print(f"    (zip) miembro: {nombre}", flush=True)
+        d = tempfile.mkdtemp()
+        zf.extract(nombre, d); zf.close()
+        return os.path.join(d, nombre), [os.path.join(d, nombre)]
     if magic[:2] == b"7z\xbc" or low.endswith(".7z"):
         try:
             import py7zr
         except ImportError:
-            raise RuntimeError("El archivo es .7z; añade 'py7zr' a requirements.txt para poder abrirlo.")
-        tmp = tempfile.mkdtemp()
+            raise RuntimeError("El archivo es .7z; añade 'py7zr' a requirements.txt.")
+        d = tempfile.mkdtemp()
         with py7zr.SevenZipFile(path, "r") as z:
-            z.extractall(tmp)
-        csvs = [os.path.join(r, f) for r, _, fs in os.walk(tmp) for f in fs if f.lower().endswith(".csv")]
+            z.extractall(d)
+        csvs = [os.path.join(r, f) for r, _, fs in os.walk(d) for f in fs if f.lower().endswith(".csv")]
         if not csvs:
             raise RuntimeError("El .7z no contiene ningún .csv")
-        print(f"    (7z) leyendo: {os.path.basename(csvs[0])}", flush=True)
-        return open(csvs[0], encoding="utf-8", errors="replace"), None
-    return open(path, encoding="utf-8", errors="replace"), None
+        print(f"    (7z) archivo: {os.path.basename(csvs[0])}", flush=True)
+        return csvs[0], [csvs[0]]
+    return path, []
+
+
+def _sniff_encoding(path):
+    """Detecta UTF-8 vs Latin-1/Windows-1252 leyendo una muestra."""
+    with open(path, "rb") as fh:
+        sample = fh.read(200_000)
+    try:
+        codecs.getincrementaldecoder("utf-8")().decode(sample, False)  # tolera corte al final
+        return "utf-8"
+    except UnicodeDecodeError:
+        return "cp1252"
 
 
 def _origen_a_path(origen):
@@ -628,8 +682,11 @@ def cmd_import_da(args):
 
     total_ins = 0
     for origen in origenes:
-        path = _origen_a_path(origen)
-        fh, cerrar = _abrir_texto(path)
+        descargado = _origen_a_path(origen)
+        csv_path, temporales = _preparar_csv(descargado)
+        enc = _sniff_encoding(csv_path)
+        print(f"    codificación detectada: {enc}", flush=True)
+        fh = open(csv_path, encoding=enc, errors="replace")
         try:
             muestra = fh.readline()
             sep = ";" if muestra.count(";") >= muestra.count(",") else ","
@@ -671,8 +728,8 @@ def cmd_import_da(args):
                 mes = int(fecha[5:7]) if fecha[5:7].isdigit() else 0
                 comprador = str(row.get(mapa.get("comprador", ""), "") or "").strip()
                 region = _region_de(c, comprador)
-                if region == "Sin Region" and mapa.get("region"):
-                    region = str(row.get(mapa["region"]) or "Sin Region").strip() or "Sin Region"
+                if region == "Sin Region":
+                    region = (_region_corta(row.get(mapa["region"])) if mapa.get("region") else None) or "Sin Region"
                 if not args.dry_run:
                     c.execute("INSERT OR REPLACE INTO oc VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
                         cod,
@@ -684,7 +741,7 @@ def cmd_import_da(args):
                         rutp,
                         str(row.get(mapa.get("estado", ""), "") or "").strip(),
                         "CLP", 1.0, _parse_monto(row.get(mapa["monto"])),
-                        str(row.get(mapa.get("tipo", ""), "") or "").strip(),
+                        _tipo_da(row),
                         anio, mes, region))
                     ins += 1
             if not args.dry_run:
@@ -694,10 +751,14 @@ def cmd_import_da(args):
             print(f"  Leídas {leidas} filas · {coincide} de tus proveedores · {estado_ins}", flush=True)
         finally:
             fh.close()
-            if cerrar:
-                cerrar.close()
-            if path != origen and os.path.exists(path):
-                os.remove(path)
+            for t in temporales:
+                d = os.path.dirname(t)
+                if os.path.exists(t):
+                    os.remove(t)
+                if d.startswith(tempfile.gettempdir()) and os.path.isdir(d) and not os.listdir(d):
+                    os.rmdir(d)
+            if descargado != origen and os.path.exists(descargado):
+                os.remove(descargado)
 
     if not args.dry_run:
         c.execute("INSERT OR REPLACE INTO meta VALUES ('last_update', ?)",

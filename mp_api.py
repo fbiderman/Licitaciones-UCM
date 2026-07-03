@@ -18,6 +18,14 @@ BASE = "https://api.mercadopublico.cl/servicios/v1/publico"
 BASE_EMP = "https://api.mercadopublico.cl/servicios/v1/Publico/Empresas"
 
 
+class MPQuotaError(Exception):
+    """La API respondió que el ticket superó su cuota diaria (Codigo 203)."""
+
+
+class MPAPIError(Exception):
+    """La API respondió con un sobre de error {Codigo, Mensaje} distinto de cuota."""
+
+
 class MPClient:
     def __init__(self, ticket: str | None = None, min_interval: float = 0.3,
                  max_retries: int = 2, timeout: int = 25):
@@ -40,12 +48,21 @@ class MPClient:
                 with urllib.request.urlopen(req, timeout=self.timeout) as r:
                     self._last = time.time()
                     raw = r.read().decode("utf-8", "replace")
-                return json.loads(raw)
-            except Exception as e:                 # noqa: BLE001
+                data = json.loads(raw)
+            except Exception as e:                 # noqa: BLE001  (fallo de red/parseo)
                 self._last = time.time()
                 if intento == self.max_retries:
                     raise
                 time.sleep(min(2 * intento, 4))    # backoff acotado
+                continue
+            # respuesta válida: detectar el sobre de error {Codigo, Mensaje} y NO reintentar
+            if (isinstance(data, dict) and "Codigo" in data and "Mensaje" in data
+                    and "Listado" not in data and "listaEmpresas" not in data and "empresas" not in data):
+                cod = data.get("Codigo"); msg = str(data.get("Mensaje", ""))
+                if cod == 203 or "cuota" in msg.lower():
+                    raise MPQuotaError(msg)
+                raise MPAPIError(f"{cod}: {msg}")
+            return data
         return {}
 
     def _url(self, endpoint: str, **params) -> str:

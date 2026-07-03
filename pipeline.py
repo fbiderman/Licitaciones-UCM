@@ -12,7 +12,8 @@ Subcomandos:
 Requiere la variable de entorno MP_TICKET (excepto para seed/build).
 """
 from __future__ import annotations
-import argparse, csv, datetime as dt, json, os, sqlite3, sys, unicodedata
+import argparse, csv, datetime as dt, gzip, io, json, os, re, sqlite3, sys, tempfile, unicodedata, urllib.request, zipfile
+csv.field_size_limit(10 * 1024 * 1024)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DB = os.path.join(HERE, "mp_traslados.db")
@@ -161,7 +162,7 @@ def _region_de(c, comprador: str) -> str:
 
 
 def cmd_update(args):
-    from mp_api import MPClient, extraer_campos
+    from mp_api import MPClient, extraer_campos, MPQuotaError
     cli = MPClient()
     c = conn()
     provs = [r for r in csv.DictReader(open(PROVIDERS, encoding="utf-8")) if r.get("codigo_proveedor")]
@@ -177,29 +178,38 @@ def cmd_update(args):
     tramo = getattr(args, "tramo", 0)
     if tramo and (hasta - desde).days > tramo:
         hasta = desde + dt.timedelta(days=tramo)  # procesa por tramos, guardando al final de cada uno
-    print(f"Actualizando {desde} -> {hasta} para {len(provs)} proveedores…", flush=True)
+    presupuesto = getattr(args, "max_llamadas", 0) or 9000   # tope de llamadas por corrida (cuota diaria = 10.000)
+    print(f"Actualizando {desde} -> {hasta} para {len(provs)} proveedores… (tope {presupuesto} llamadas)", flush=True)
 
-    nuevas = 0; ok = 0; err = 0
+    nuevas = 0; ok = 0; err = 0; llamadas = 0; corte = None
     dia = desde
-    while dia <= hasta:
+    while dia <= hasta and corte is None:
         fstr = dia.strftime("%d%m%Y")
         d_ok = 0; d_err = 0
         for p in provs:
+            if llamadas >= presupuesto:
+                corte = "presupuesto"; break
             try:
-                listado = cli.oc_por_proveedor_dia(p["codigo_proveedor"], fstr)
+                listado = cli.oc_por_proveedor_dia(p["codigo_proveedor"], fstr); llamadas += 1
                 d_ok += 1
-            except Exception:  # noqa: BLE001
-                d_err += 1; continue
+            except MPQuotaError as e:
+                corte = f"CUOTA DIARIA AGOTADA (Codigo 203): {e}"; break
+            except Exception:  # noqa: BLE001  (fallo puntual de un proveedor)
+                llamadas += 1; d_err += 1; continue
             for item in listado:
                 cod = item.get("Codigo") or item.get("codigo")
                 if not cod:
                     continue
                 if c.execute("SELECT 1 FROM oc WHERE codigo=?", (cod,)).fetchone():
                     continue
+                if llamadas >= presupuesto:
+                    corte = "presupuesto"; break
                 try:
-                    det = cli.oc_detalle(cod)
+                    det = cli.oc_detalle(cod); llamadas += 1
+                except MPQuotaError as e:
+                    corte = f"CUOTA DIARIA AGOTADA (Codigo 203): {e}"; break
                 except Exception:  # noqa: BLE001
-                    continue
+                    llamadas += 1; continue
                 if not det:
                     continue
                 f = extraer_campos(det)
@@ -218,17 +228,19 @@ def cmd_update(args):
                 nuevas += 1
         ok += d_ok; err += d_err
         c.commit()
-        print(f"  {dia}  ok={d_ok} err={d_err}  (+{nuevas} OC nuevas)", flush=True)
-        # corte temprano: si la API falla en (casi) todas las consultas, no seguir horas
-        if ok == 0 and err >= len(provs):
-            print("  ! La API está devolviendo errores en todas las consultas. "
-                  "Probablemente inestabilidad temporal de Mercado Público; reintenta más tarde.", flush=True)
+        print(f"  {dia}  ok={d_ok} err={d_err}  (+{nuevas} OC nuevas · {llamadas} llamadas)", flush=True)
+        if corte:
             break
         dia += dt.timedelta(days=1)
     c.execute("INSERT OR REPLACE INTO meta VALUES ('last_update', ?)",
               (dt.datetime.now().isoformat(timespec="seconds"),))
     c.commit()
-    print(f"Listo. {nuevas} OC nuevas incorporadas. Consultas ok={ok} err={err}.", flush=True)
+    if corte and corte.startswith("CUOTA"):
+        print(f"  ! {corte}", flush=True)
+        print(f"  ! Detenido en {dia}. La cuota se reinicia cada día; la próxima corrida retoma desde aquí.", flush=True)
+    elif corte == "presupuesto":
+        print(f"  ! Alcanzado el tope de {presupuesto} llamadas en {dia}. La próxima corrida continúa.", flush=True)
+    print(f"Listo. {nuevas} OC nuevas · {llamadas} llamadas · ok={ok} err={err}.", flush=True)
 
 
 # ------------------------------------------------------------------ CANDIDATES
@@ -479,6 +491,217 @@ def cmd_probe(args):
         print("La consulta [A] sí trae datos; el problema estaría en el parseo, no en la consulta.")
 
 
+# ------------------------------------------------------------ IMPORT DATOS ABIERTOS
+# Alias de columnas de los CSV de datos-abiertos.chilecompra.cl (Órdenes de Compra).
+# Se comparan tras normalizar (mayúsculas, sin tildes, solo alfanumérico).
+_DA_ALIASES = {
+    "codigo":        ["Codigo", "CodigoOrdenCompra", "CodigoOC", "IdOrdenCompra", "OrdenDeCompra", "codigoOrdenCompra"],
+    "nombre":        ["Nombre", "NombreOC", "NombreOrdenCompra"],
+    "comprador":     ["NombreOrganismo", "Organismo", "NombreUnidadCompra", "UnidadDeCompra", "Institucion",
+                      "NombreInstitucion", "Comprador", "sector", "Sector"],
+    "rut_comprador": ["RutUnidadCompra", "RutOrganismo", "RutInstitucion", "RutComprador"],
+    "fecha":         ["FechaEnvio", "FechaCreacion", "FechaOrdenCompra", "Fecha", "FechaAceptacion", "FechaEnvioOC"],
+    "proveedor":     ["NombreProveedor", "RazonSocialProveedor", "RazonSocialSucursal", "Proveedor", "NombreSucursal"],
+    "rut_proveedor": ["RutProveedor", "RutSucursal", "RutEmpresaProveedor", "RUTProveedor", "Rut"],
+    "estado":        ["Estado", "EstadoOC", "NombreEstado", "CodigoEstado"],
+    "monto":         ["MontoTotalOC_PesosChilenos", "MontoTotalPesos", "MontoTotal", "MontoBruto",
+                      "MontoOC", "Monto", "MontoTotalBruto", "montoTotal"],
+    "tipo":          ["TipoModalidad", "Modalidad", "Tipo", "TipoOrdenCompra", "TipoDeCompra", "TipoContrato"],
+    "region":        ["RegionUnidadCompra", "Region", "RegionOrganismo"],
+}
+
+
+def _colnorm(s: str) -> str:
+    s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Z0-9]", "", s.upper())
+
+
+def _rut_norm(s: str) -> str:
+    return re.sub(r"[^0-9K]", "", str(s or "").upper())
+
+
+def _mapear_columnas(header):
+    """Devuelve {campo_interno: nombre_real_de_columna} según los alias conocidos."""
+    norm2real = {_colnorm(h): h for h in header}
+    mapa = {}
+    for campo, alias in _DA_ALIASES.items():
+        for a in alias:
+            real = norm2real.get(_colnorm(a))
+            if real is not None:
+                mapa[campo] = real
+                break
+    return mapa
+
+
+def _parse_monto(v):
+    s = str(v or "").strip()
+    if not s:
+        return 0.0
+    s = re.sub(r"[^0-9,.\-]", "", s)
+    if "," in s and "." in s:          # 1.234.567,89  -> punto miles, coma decimal
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:                      # 1234567,89    -> coma decimal
+        s = s.replace(",", ".")
+    else:                               # 1.234.567     -> punto como separador de miles
+        if s.count(".") > 1 or re.match(r"^\d{1,3}(\.\d{3})+$", s):
+            s = s.replace(".", "")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _parse_fecha(v):
+    s = str(v or "").strip()
+    if not s:
+        return None
+    s = s.replace("T", " ").split(".")[0].split(" ")[0]
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%m/%d/%Y"):
+        try:
+            return dt.datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _abrir_texto(path):
+    """Devuelve (file_texto, handle_a_cerrar) descomprimiendo por magia de bytes o extensión."""
+    with open(path, "rb") as fh:
+        magic = fh.read(6)
+    low = path.lower()
+    if magic[:2] == b"\x1f\x8b" or low.endswith(".gz"):
+        return io.TextIOWrapper(gzip.open(path, "rb"), encoding="utf-8", errors="replace"), None
+    if magic[:2] == b"PK" or low.endswith(".zip"):
+        zf = zipfile.ZipFile(path)
+        nombre = next((n for n in zf.namelist() if n.lower().endswith(".csv")), zf.namelist()[0])
+        print(f"    (zip) leyendo miembro: {nombre}", flush=True)
+        return io.TextIOWrapper(zf.open(nombre), encoding="utf-8", errors="replace"), zf
+    if magic[:2] == b"7z\xbc" or low.endswith(".7z"):
+        try:
+            import py7zr
+        except ImportError:
+            raise RuntimeError("El archivo es .7z; añade 'py7zr' a requirements.txt para poder abrirlo.")
+        tmp = tempfile.mkdtemp()
+        with py7zr.SevenZipFile(path, "r") as z:
+            z.extractall(tmp)
+        csvs = [os.path.join(r, f) for r, _, fs in os.walk(tmp) for f in fs if f.lower().endswith(".csv")]
+        if not csvs:
+            raise RuntimeError("El .7z no contiene ningún .csv")
+        print(f"    (7z) leyendo: {os.path.basename(csvs[0])}", flush=True)
+        return open(csvs[0], encoding="utf-8", errors="replace"), None
+    return open(path, encoding="utf-8", errors="replace"), None
+
+
+def _origen_a_path(origen):
+    """Si 'origen' es URL, la descarga a un temporal y devuelve el path; si es ruta, la devuelve."""
+    if origen.lower().startswith(("http://", "https://")):
+        print(f"  Descargando {origen} …", flush=True)
+        fd, tmp = tempfile.mkstemp()
+        os.close(fd)
+        req = urllib.request.Request(origen, headers={"User-Agent": "traslados-dashboard/1.0"})
+        with urllib.request.urlopen(req, timeout=600) as r, open(tmp, "wb") as out:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+        print(f"  Descargado ({os.path.getsize(tmp)/1e6:.1f} MB).", flush=True)
+        return tmp
+    return origen
+
+
+def cmd_import_da(args):
+    c = conn()
+    ruts = {_rut_norm(r["rut"]): r["alias"] for r in csv.DictReader(open(PROVIDERS, encoding="utf-8")) if r.get("rut")}
+    if not ruts:
+        print("No hay RUT en providers.csv."); return
+    print(f"Filtrando por {len(ruts)} RUT de proveedores.", flush=True)
+
+    origenes = list(args.url or [])
+    if args.dir and os.path.isdir(args.dir):
+        for f in sorted(os.listdir(args.dir)):
+            if f.lower().endswith((".csv", ".gz", ".zip", ".7z")):
+                origenes.append(os.path.join(args.dir, f))
+    if not origenes:
+        print("Sin fuentes. Usa --url <URL> (repetible) o --dir <carpeta>.")
+        return
+
+    total_ins = 0
+    for origen in origenes:
+        path = _origen_a_path(origen)
+        fh, cerrar = _abrir_texto(path)
+        try:
+            muestra = fh.readline()
+            sep = ";" if muestra.count(";") >= muestra.count(",") else ","
+            header = next(csv.reader([muestra], delimiter=sep))
+            mapa = _mapear_columnas(header)
+            print(f"\n  Fuente: {os.path.basename(str(origen))}")
+            print(f"  Separador detectado: '{sep}' · {len(header)} columnas")
+            print(f"  Mapeo de columnas: {mapa}", flush=True)
+            faltan = [k for k in ("codigo", "rut_proveedor", "monto", "fecha") if k not in mapa]
+            if faltan:
+                print(f"  ! No pude ubicar columnas clave: {faltan}")
+                print(f"  ! Cabecera real: {header}")
+                print("  ! Ajusta _DA_ALIASES con estos nombres y reintenta. No se insertó nada de esta fuente.")
+                continue
+
+            reader = csv.DictReader(fh, fieldnames=header, delimiter=sep)
+            leidas = 0; coincide = 0; ins = 0
+            for row in reader:
+                leidas += 1
+                if args.limit and leidas > args.limit:
+                    break
+                rutp = _rut_norm(row.get(mapa["rut_proveedor"]))
+                if rutp not in ruts:
+                    continue
+                coincide += 1
+                cod = str(row.get(mapa["codigo"]) or "").strip()
+                if not cod:
+                    continue
+                fecha = _parse_fecha(row.get(mapa["fecha"])) or ""
+                anio = int(fecha[:4]) if fecha[:4].isdigit() else 0
+                mes = int(fecha[5:7]) if fecha[5:7].isdigit() else 0
+                comprador = str(row.get(mapa.get("comprador", ""), "") or "").strip()
+                region = _region_de(c, comprador)
+                if region == "Sin Region" and mapa.get("region"):
+                    region = str(row.get(mapa["region"]) or "Sin Region").strip() or "Sin Region"
+                if not args.dry_run:
+                    c.execute("INSERT OR REPLACE INTO oc VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+                        cod,
+                        str(row.get(mapa.get("nombre", ""), "") or "").strip(),
+                        comprador,
+                        str(row.get(mapa.get("rut_comprador", ""), "") or "").strip(),
+                        fecha,
+                        str(row.get(mapa.get("proveedor", ""), "") or ruts[rutp]).strip(),
+                        rutp,
+                        str(row.get(mapa.get("estado", ""), "") or "").strip(),
+                        "CLP", 1.0, _parse_monto(row.get(mapa["monto"])),
+                        str(row.get(mapa.get("tipo", ""), "") or "").strip(),
+                        anio, mes, region))
+                    ins += 1
+            if not args.dry_run:
+                c.commit()
+            total_ins += ins
+            estado_ins = "(dry-run, 0 insertadas)" if args.dry_run else f"{ins} insertadas/actualizadas"
+            print(f"  Leídas {leidas} filas · {coincide} de tus proveedores · {estado_ins}", flush=True)
+        finally:
+            fh.close()
+            if cerrar:
+                cerrar.close()
+            if path != origen and os.path.exists(path):
+                os.remove(path)
+
+    if not args.dry_run:
+        c.execute("INSERT OR REPLACE INTO meta VALUES ('last_update', ?)",
+                  (dt.datetime.now().isoformat(timespec="seconds"),))
+        c.commit()
+        n = c.execute("SELECT COUNT(*) FROM oc").fetchone()[0]
+        mx = c.execute("SELECT MAX(fecha) FROM oc").fetchone()[0]
+        print(f"\nListo. {total_ins} filas incorporadas. Base ahora: {n} OC, máx fecha {mx}.", flush=True)
+    else:
+        print("\nModo prueba (dry-run): nada se guardó. Revisa el mapeo de columnas arriba.", flush=True)
+
+
 def cmd_run(args):
     cmd_resolve(args); cmd_update(args)
     if getattr(args, "sugerencias", 0):
@@ -497,8 +720,16 @@ def main():
     sub.add_parser("resolve").set_defaults(func=cmd_resolve)
     u = sub.add_parser("update"); u.add_argument("--desde"); u.add_argument("--hasta")
     u.add_argument("--dias", type=int, default=14); u.add_argument("--tramo", type=int, default=0)
+    u.add_argument("--max-llamadas", dest="max_llamadas", type=int, default=0,
+                   help="tope de llamadas a la API por corrida (cuota diaria del ticket = 10.000)")
     u.set_defaults(func=cmd_update)
     sub.add_parser("build").set_defaults(func=cmd_build)
+    da = sub.add_parser("import-da", help="Importa OC desde CSV de Datos Abiertos (URL o carpeta), filtrando por tus RUT.")
+    da.add_argument("--url", action="append", help="URL de un CSV/zip/7z de Datos Abiertos (repetible).")
+    da.add_argument("--dir", default="datos_abiertos", help="Carpeta con archivos a importar (por defecto: datos_abiertos).")
+    da.add_argument("--dry-run", action="store_true", help="Solo muestra el mapeo de columnas y cuenta, sin guardar.")
+    da.add_argument("--limit", type=int, default=0, help="Procesa solo las primeras N filas (para pruebas).")
+    da.set_defaults(func=cmd_import_da)
     ca = sub.add_parser("candidates"); ca.add_argument("--desde"); ca.add_argument("--hasta")
     ca.add_argument("--dias", type=int, default=30); ca.set_defaults(func=cmd_candidates)
     li = sub.add_parser("licitaciones"); li.add_argument("--desde"); li.add_argument("--hasta")
@@ -509,6 +740,8 @@ def main():
     pr.set_defaults(func=cmd_probe)
     r = sub.add_parser("run"); r.add_argument("--desde"); r.add_argument("--hasta")
     r.add_argument("--dias", type=int, default=14); r.add_argument("--tramo", type=int, default=0)
+    r.add_argument("--max-llamadas", dest="max_llamadas", type=int, default=0,
+                   help="tope de llamadas a la API por corrida (cuota diaria del ticket = 10.000)")
     r.add_argument("--sugerencias", type=int, default=0,
                    help="si >0, escanea ese N de días buscando proveedores candidatos")
     r.add_argument("--licitaciones", type=int, default=0,

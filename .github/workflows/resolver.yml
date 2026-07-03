@@ -3,10 +3,10 @@ name: Resolver Codigos Proveedor
 on:
   workflow_dispatch:
     inputs:
-      url:
-        description: "URL de un mes reciente de Datos Abiertos (para leer CodigoProveedor)"
-        required: true
-        default: "https://transparenciachc.blob.core.windows.net/oc-da/2026-6.zip"
+      meses:
+        description: "Cuántos meses hacia atrás recorrer para resolver códigos"
+        required: false
+        default: "12"
 
 permissions:
   contents: write
@@ -27,7 +27,14 @@ jobs:
       - name: Corregir codigo_proveedor desde Datos Abiertos
         env:
           PYTHONUNBUFFERED: "1"
-        run: python pipeline.py resolve-da --url "${{ inputs.url }}"
+        run: |
+          ARGS=""
+          for i in $(seq 1 ${{ inputs.meses }}); do
+            YM=$(date -d "$(date +%Y-%m-01) -$i month" +%Y-%-m)
+            ARGS="$ARGS --url https://transparenciachc.blob.core.windows.net/oc-da/$YM.zip"
+          done
+          echo "Meses a revisar: $ARGS"
+          python pipeline.py resolve-da $ARGS
 
       - name: Guardar providers.csv
         run: |

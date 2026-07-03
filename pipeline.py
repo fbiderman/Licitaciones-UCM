@@ -671,7 +671,13 @@ def cmd_import_da(args):
         print("No hay RUT en providers.csv."); return
     print(f"Filtrando por {len(ruts)} RUT de proveedores.", flush=True)
 
-    origenes = list(args.url or [])
+    origenes = []
+    for u in (args.url or []):
+        u = str(u).strip()
+        if u.lower().startswith(("http://", "https://")):
+            u = u.split()[0]      # descarta texto pegado tras la URL (p.ej. "Descargar archivo")
+        if u:
+            origenes.append(u)
     if args.dir and os.path.isdir(args.dir):
         for f in sorted(os.listdir(args.dir)):
             if f.lower().endswith((".csv", ".gz", ".zip", ".7z")):

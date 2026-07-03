@@ -1,0 +1,38 @@
+name: Resolver Codigos Proveedor
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL de un mes reciente de Datos Abiertos (para leer CodigoProveedor)"
+        required: true
+        default: "https://transparenciachc.blob.core.windows.net/oc-da/2026-6.zip"
+
+permissions:
+  contents: write
+
+jobs:
+  resolver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Corregir codigo_proveedor desde Datos Abiertos
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python pipeline.py resolve-da --url "${{ inputs.url }}"
+
+      - name: Guardar providers.csv
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add providers.csv
+          git commit -m "Corregir CodigoProveedor desde Datos Abiertos" || echo "Sin cambios"
+          git push

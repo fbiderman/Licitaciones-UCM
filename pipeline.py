@@ -777,6 +777,82 @@ def cmd_import_da(args):
         print("\nModo prueba (dry-run): nada se guardó. Revisa el mapeo de columnas arriba.", flush=True)
 
 
+def cmd_resolve_da(args):
+    """Extrae el CodigoProveedor correcto desde archivos de Datos Abiertos y lo escribe en providers.csv."""
+    from collections import Counter
+    filas = list(csv.DictReader(open(PROVIDERS, encoding="utf-8")))
+    rutset = {_rut_norm(p["rut"]) for p in filas if p.get("rut")}
+    if not rutset:
+        print("No hay RUT en providers.csv."); return
+
+    origenes = []
+    for u in (args.url or []):
+        u = str(u).strip()
+        if u.lower().startswith(("http://", "https://")):
+            u = u.split()[0]
+        if u:
+            origenes.append(u)
+    if args.dir and os.path.isdir(args.dir):
+        for f in sorted(os.listdir(args.dir)):
+            if f.lower().endswith((".csv", ".gz", ".zip", ".7z")):
+                origenes.append(os.path.join(args.dir, f))
+    if not origenes:
+        print("Sin fuentes. Usa --url <URL> o --dir <carpeta>."); return
+
+    encontrados = {}  # rut_norm -> Counter de CodigoProveedor
+    for origen in origenes:
+        descargado = _origen_a_path(origen)
+        csv_path, temporales = _preparar_csv(descargado)
+        enc = _sniff_encoding(csv_path)
+        fh = open(csv_path, encoding=enc, errors="replace")
+        try:
+            muestra = fh.readline()
+            sep = ";" if muestra.count(";") >= muestra.count(",") else ","
+            header = next(csv.reader([muestra], delimiter=sep))
+            mapa = _mapear_columnas(header)
+            col_rut = mapa.get("rut_proveedor")
+            norm2real = {_colnorm(h): h for h in header}
+            col_cod = norm2real.get(_colnorm("CodigoProveedor"))
+            if not col_rut or not col_cod:
+                print(f"  ! No encontré columnas de RUT y/o CodigoProveedor en {os.path.basename(str(origen))}. Cabecera: {header}")
+                continue
+            reader = csv.DictReader(fh, fieldnames=header, delimiter=sep)
+            for row in reader:
+                rn = _rut_norm(row.get(col_rut))
+                if rn in rutset:
+                    cod = str(row.get(col_cod) or "").strip()
+                    if cod:
+                        encontrados.setdefault(rn, Counter())[cod] += 1
+        finally:
+            fh.close()
+            for t in temporales:
+                d = os.path.dirname(t)
+                if os.path.exists(t):
+                    os.remove(t)
+                if d.startswith(tempfile.gettempdir()) and os.path.isdir(d) and not os.listdir(d):
+                    os.rmdir(d)
+            if descargado != origen and os.path.exists(descargado):
+                os.remove(descargado)
+
+    cambios = 0
+    for p in filas:
+        rn = _rut_norm(p["rut"])
+        if rn in encontrados and encontrados[rn]:
+            cod = encontrados[rn].most_common(1)[0][0]
+            if str(p.get("codigo_proveedor", "")) != str(cod):
+                print(f"  {p['rut']:>12}  {p.get('codigo_proveedor','') or '(vacío)':>10} -> {cod}  ({p['alias']})")
+                p["codigo_proveedor"] = cod; cambios += 1
+    with open(PROVIDERS, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["alias", "rut", "codigo_proveedor"])
+        w.writeheader(); w.writerows(filas)
+    resueltos = sum(1 for r in filas if r.get("codigo_proveedor"))
+    sin = [r["alias"] for r in filas if _rut_norm(r["rut"]) not in encontrados]
+    print(f"\nListo. {cambios} códigos corregidos. Con código: {resueltos}/{len(filas)}.")
+    if sin:
+        print(f"Sin aparición en las fuentes ({len(sin)}): {', '.join(sin[:15])}{' …' if len(sin) > 15 else ''}")
+        print("(Esos proveedores no tuvieron órdenes en el/los mes(es) usados; prueba con otro mes si te interesa resolverlos.)")
+
+
 def cmd_run(args):
     cmd_resolve(args); cmd_update(args)
     if getattr(args, "sugerencias", 0):
@@ -799,6 +875,10 @@ def main():
                    help="tope de llamadas a la API por corrida (cuota diaria del ticket = 10.000)")
     u.set_defaults(func=cmd_update)
     sub.add_parser("build").set_defaults(func=cmd_build)
+    rda = sub.add_parser("resolve-da", help="Corrige codigo_proveedor en providers.csv usando CodigoProveedor de Datos Abiertos.")
+    rda.add_argument("--url", action="append", help="URL de un CSV/zip de Datos Abiertos (repetible).")
+    rda.add_argument("--dir", default="datos_abiertos", help="Carpeta con archivos (por defecto: datos_abiertos).")
+    rda.set_defaults(func=cmd_resolve_da)
     da = sub.add_parser("import-da", help="Importa OC desde CSV de Datos Abiertos (URL o carpeta), filtrando por tus RUT.")
     da.add_argument("--url", action="append", help="URL de un CSV/zip/7z de Datos Abiertos (repetible).")
     da.add_argument("--dir", default="datos_abiertos", help="Carpeta con archivos a importar (por defecto: datos_abiertos).")

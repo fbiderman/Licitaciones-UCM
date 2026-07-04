@@ -399,7 +399,32 @@ def cmd_build(args):
     n_uf = c.execute("SELECT COUNT(*) FROM oc WHERE UPPER(moneda) IN ('CLF','UF')").fetchone()[0]
     n_utm = c.execute("SELECT COUNT(*) FROM oc WHERE UPPER(moneda)='UTM'").fetchone()[0]
     fx = {"uf": last_fx("uf"), "utm": last_fx("utm"), "n_uf": n_uf, "n_utm": n_utm}
-    uf_ref = last_fx("uf")  # UF de referencia para el selector $/UF
+    uf_ref = last_fx("uf")  # UF de referencia (respaldo)
+
+    # ---- UF de cierre por año (31-dic); año en curso usa la UF más reciente ----
+    # Valores de respaldo (UF al 31-dic) por si no hay red al construir.
+    _UF_EOY = {2016:26348,2017:26798,2018:27566,2019:28310,2020:29070,
+               2021:30992,2022:35111,2023:36789,2024:38363,2025:40197,2026:40828}
+    def _uf_en(fecha_iso):
+        r = c.execute("SELECT valor FROM fx WHERE fecha=? AND indicador='uf'", (fecha_iso,)).fetchone()
+        if r:
+            return r[0]
+        try:
+            from mp_api import fetch_indicador
+            v = fetch_indicador("uf", fecha_iso)
+        except Exception:  # noqa: BLE001
+            v = None
+        if v:
+            c.execute("INSERT OR REPLACE INTO fx VALUES (?,?,?)", (fecha_iso, "uf", v)); c.commit()
+        return v
+    cur_year = dt.date.today().year
+    hoy_iso = dt.date.today().isoformat()
+    uf_by_year = {}
+    anios_oc = [r[0] for r in c.execute("SELECT DISTINCT anio FROM oc WHERE anio>0 ORDER BY anio")]
+    for y in anios_oc:
+        fecha = hoy_iso if y >= cur_year else f"{y}-12-31"
+        val = _uf_en(fecha) or _UF_EOY.get(y) or (uf_ref or {}).get("valor") or 40000
+        uf_by_year[str(y)] = round(val)
 
     updated = (c.execute("SELECT valor FROM meta WHERE clave='last_update'").fetchone() or
                [dt.datetime.now().isoformat(timespec="seconds")])[0]
@@ -423,7 +448,8 @@ def cmd_build(args):
 
     data = {"meta": {"source": "Mercado Publico - Traslados", "snapshot": snap,
                      "updated": updated, "data_through": data_through,
-                     "rows": len(out), "total_clp": int(total), "fx": fx, "uf_ref": uf_ref},
+                     "rows": len(out), "total_clp": int(total), "fx": fx, "uf_ref": uf_ref,
+                     "uf_by_year": uf_by_year},
             "prov": inv(prov), "comp": inv(comp), "reg": inv(reg),
             "est": inv(est), "tip": inv(tip), "rows": out,
             "roster": roster, "candidates": cand, "lic": lic}

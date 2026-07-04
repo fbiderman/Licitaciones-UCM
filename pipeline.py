@@ -435,21 +435,18 @@ def cmd_build(args):
                [dt.datetime.now().isoformat(timespec="seconds")])[0]
     data_through = c.execute("SELECT MAX(fecha) FROM oc").fetchone()[0] or snap
 
-    # ---- licitaciones (bloque compacto propio) ----
-    lic_rows_db = c.execute("""SELECT anio,mes,comprador,region,estado,tipo,
-        monto_estimado*COALESCE(conversion_rate,1), adjudicada FROM licitacion""").fetchall()
-    lc, lr, le, lt = {}, {}, {}, {}
+    # ---- licitaciones (dos orígenes: 'mercado' y 'proveedor') ----
+    lc, lr, le = {}, {}, {}
     lic_rows = []
-    for a, mm, cp, rg, es, tp, monto, adj in lic_rows_db:
-        lic_rows.append([int(a), int(mm), idx(lc, cp), idx(lr, rg), idx(le, es),
-                         idx(lt, tp), round(float(monto or 0)), int(adj or 0)])
-    lic_recent = [{"codigo": r[0], "nombre": r[1], "comp": r[2], "est": r[3],
-                   "fecha": r[4], "monto": round(float(r[5] or 0))}
-                  for r in c.execute("""SELECT codigo,nombre,comprador,estado,fecha,
-                      monto_estimado*COALESCE(conversion_rate,1) FROM licitacion
-                      ORDER BY fecha DESC LIMIT 40""")]
-    lic = {"comp": inv(lc), "reg": inv(lr), "est": inv(le), "tip": inv(lt),
-           "rows": lic_rows, "recent": lic_recent}
+    for orig, a, mm, cp, rg, es, monto, adj, cod, nom, fch in c.execute("""
+            SELECT origen,anio,mes,comprador,region,estado,
+                   monto_estimado*COALESCE(conversion_rate,1),adjudicada,codigo,nombre,fecha
+            FROM licitacion"""):
+        lic_rows.append([0 if (orig or "mercado") == "mercado" else 1,
+                         int(a or 0), int(mm or 0), idx(lc, cp or ""), idx(lr, rg or "Sin Region"),
+                         idx(le, es or ""), round(float(monto or 0)), int(adj or 0),
+                         cod or "", nom or "", (fch or "")[:10]])
+    lic = {"comp": inv(lc), "reg": inv(lr), "est": inv(le), "rows": lic_rows}
 
     data = {"meta": {"source": "Mercado Publico - Traslados", "snapshot": snap,
                      "updated": updated, "data_through": data_through,

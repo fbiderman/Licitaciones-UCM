@@ -571,6 +571,12 @@ def _parse_monto(v):
     s = str(v or "").strip()
     if not s:
         return 0.0
+    m = re.match(r"^\s*([0-9]+[.,]?[0-9]*)\s*[eE]\s*([+-]?[0-9]+)\s*$", s)  # "5,7e+07"
+    if m:
+        try:
+            return float(m.group(1).replace(",", ".")) * (10 ** int(m.group(2)))
+        except ValueError:
+            return 0.0
     s = re.sub(r"[^0-9,.\-]", "", s)
     if "," in s and "." in s:          # 1.234.567,89  -> punto miles, coma decimal
         s = s.replace(".", "").replace(",", ".")
@@ -900,31 +906,41 @@ _LIC_ALIASES = {
     "estado":    ["Estado", "EstadoLicitacion", "CodigoEstado", "NombreEstado"],
     "monto":     ["MontoEstimado", "MontoEstimadoLicitacion", "Monto", "MontoTotal", "MontoTotalEstimado"],
     "tipo":      ["Tipo", "TipoLicitacion", "TipoConvocatoria", "Modalidad"],
-    "region":    ["RegionUnidadCompra", "Region", "RegionOrganismo"],
+    "region":    ["RegionUnidad", "RegionUnidadCompra", "Region", "RegionOrganismo"],
     "adjudicada":["FechaAdjudicacion", "NumeroAdjudicaciones"],
 }
 # rubro/categoría del ítem, para detectar traslados
-_LIC_RUBRO_COLS = ["Categoria", "NombreProductoGenerico", "NombreroductoGenerico", "Producto",
-                   "RubroN1", "RubroN2", "RubroN3", "CodigoProductoONU", "codigoProductoONU",
-                   "codigoCategoria", "CodigoCategoria", "Nombre", "Descripcion"]
-_TRASLADO_KEYS = ["ambulancia", "traslado de pacientes", "traslado pacientes", "traslado sanitario",
-                  "servicios de ambulancia", "transporte de pacientes", "traslado clinico"]
-_TRASLADO_ONU = {"92101902", "25101703"}   # servicios de ambulancia / ambulancias
+_LIC_RUBRO_COLS = ["CodigoProductoONU", "codigoProductoONU", "Nombre producto genrico",
+                   "Nombre linea Adquisicion", "Rubro3", "Rubro2", "Rubro1",
+                   "Nombre", "Descripcion", "Descripcion linea Adquisicion"]
+# servicios de traslado de pacientes (el mercado de UCM)
+_SERVICIO_ONU = {"92101902"}          # "Servicios de ambulancia"
+_SERVICIO_KEYS = ["traslado de pacientes", "traslado pacientes", "transporte de pacientes",
+                  "servicio de ambulancia", "servicios de ambulancia", "traslado asistido",
+                  "traslado clinico", "traslado sanitario", "servicio de traslado",
+                  "traslado de urgencia", "transporte asistido", "atencion prehospitalaria"]
+# compra o mantención de vehículos ambulancia (mercado distinto)
+_VEHICULO_ONU = {"25101703"}          # "Ambulancias" (vehículo)
+_VEHICULO_KEYS = ["ambulancia"]       # cae aquí si no calzó como servicio
 
 
 def _txtnorm(s):
     return unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode().lower()
 
 
-def _es_traslado(row, mapa_rubro):
+def _clasificar_traslado(row, mapa_rubro):
+    """Devuelve 'servicio', 'vehiculo' o None según el rubro/nombre del ítem."""
+    codes = set(); txt = []
     for col in mapa_rubro:
-        v = _txtnorm(row.get(col, ""))
-        if any(k in v for k in _TRASLADO_KEYS):
-            return True
-        vs = str(row.get(col, "") or "").strip()
-        if vs in _TRASLADO_ONU:
-            return True
-    return False
+        raw = str(row.get(col, "") or "").strip()
+        if raw:
+            codes.add(raw); txt.append(_txtnorm(raw))
+    blob = " ".join(txt)
+    if (_SERVICIO_ONU & codes) or any(k in blob for k in _SERVICIO_KEYS):
+        return "servicio"
+    if (_VEHICULO_ONU & codes) or any(k in blob for k in _VEHICULO_KEYS):
+        return "vehiculo"
+    return None
 
 
 def cmd_import_lic_da(args):
@@ -972,9 +988,9 @@ def cmd_import_lic_da(args):
                 print("  ! Ajusta _LIC_ALIASES y reintenta."); continue
 
             reader = csv.DictReader(fh, fieldnames=header, delimiter=sep)
-            vistos = {}      # codigo -> True si algún ítem es de traslado
-            filas = {}       # codigo -> datos de la licitación (última fila vista)
-            leidas = 0; match_items = 0; ejemplo = None
+            cat = {}         # codigo -> 'servicio' | 'vehiculo' (servicio prima)
+            filas = {}       # codigo -> última fila vista
+            leidas = 0; it_serv = 0; it_veh = 0; ejemplo = None
             for row in reader:
                 leidas += 1
                 if args.limit and leidas > args.limit:
@@ -982,24 +998,33 @@ def cmd_import_lic_da(args):
                 cod = str(row.get(mapa["codigo"]) or "").strip()
                 if not cod:
                     continue
-                es = _es_traslado(row, mapa_rubro)
-                if es:
-                    match_items += 1
+                cl = _clasificar_traslado(row, mapa_rubro)
+                if cl == "servicio":
+                    it_serv += 1
                     if args.dry_run and ejemplo is None:
                         ejemplo = {k: str(v)[:60] for k, v in row.items() if str(v or "").strip()}
-                vistos[cod] = vistos.get(cod, False) or es
-                filas[cod] = row
-            traslado_codes = [k for k, v in vistos.items() if v]
-            print(f"  Leídas {leidas} filas · {match_items} ítems de traslado · {len(traslado_codes)} licitaciones de traslado", flush=True)
+                elif cl == "vehiculo":
+                    it_veh += 1
+                if cl:
+                    prev = cat.get(cod)
+                    cat[cod] = "servicio" if (cl == "servicio" or prev == "servicio") else "vehiculo"
+                    filas[cod] = row
+            serv_codes = [k for k, v in cat.items() if v == "servicio"]
+            veh_codes = [k for k, v in cat.items() if v == "vehiculo"]
+            incluir_veh = getattr(args, "incluir_vehiculos", False)
+            cargar = serv_codes + (veh_codes if incluir_veh else [])
+            print(f"  Leídas {leidas} filas · ítems: {it_serv} servicio / {it_veh} vehículo")
+            print(f"  Licitaciones: {len(serv_codes)} de SERVICIO de traslado · {len(veh_codes)} de compra/mantención de vehículos")
+            print(f"  Se cargarán: {len(cargar)} ({'servicio + vehículo' if incluir_veh else 'solo servicio'})", flush=True)
             if args.dry_run and ejemplo:
-                print("  EJEMPLO (primer ítem de traslado):")
+                print("  EJEMPLO (primer ítem de SERVICIO de traslado):")
                 for k, v in ejemplo.items():
                     print(f"      {k} = {v}")
             if args.dry_run:
                 continue
 
             ins = 0
-            for cod in traslado_codes:
+            for cod in cargar:
                 row = filas[cod]
                 fecha = _parse_fecha(row.get(mapa["fecha"])) or ""
                 anio = int(fecha[:4]) if fecha[:4].isdigit() else 0
@@ -1008,13 +1033,13 @@ def cmd_import_lic_da(args):
                 region = _region_de(c, comprador)
                 if region == "Sin Region":
                     region = (_region_corta(row.get(mapa["region"])) if mapa.get("region") else None) or "Sin Region"
-                adj = row.get(mapa.get("adjudicada", ""), "")
-                adjudicada = 1 if str(adj or "").strip() not in ("", "0", "NA", "None") else 0
+                estado = str(row.get(mapa.get("estado", ""), "") or "").strip()
+                adjudicada = 1 if _txtnorm(estado) == "adjudicada" else 0
                 c.execute("INSERT OR REPLACE INTO licitacion VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
                     cod,
                     str(row.get(mapa.get("nombre", ""), "") or "").strip(),
                     comprador,
-                    str(row.get(mapa.get("estado", ""), "") or "").strip(),
+                    estado,
                     fecha,
                     str(row.get(mapa.get("tipo", ""), "") or "").strip(),
                     "CLP", 1.0, _parse_monto(row.get(mapa["monto"])),
@@ -1086,6 +1111,7 @@ def main():
     lda.add_argument("--url", action="append", help="URL de un archivo de lic-da (repetible).")
     lda.add_argument("--dir", default="lic_abiertos", help="Carpeta con archivos (por defecto: lic_abiertos).")
     lda.add_argument("--dry-run", action="store_true", help="Solo muestra mapeo, cabecera y conteo de traslado.")
+    lda.add_argument("--incluir-vehiculos", action="store_true", help="Incluye también compra/mantención de ambulancias (por defecto solo servicios).")
     lda.add_argument("--limit", type=int, default=0, help="Procesa solo las primeras N filas (para pruebas).")
     lda.set_defaults(func=cmd_import_lic_da)
     ca = sub.add_parser("candidates"); ca.add_argument("--desde"); ca.add_argument("--hasta")

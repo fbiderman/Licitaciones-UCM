@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS candidates (
 CREATE TABLE IF NOT EXISTS licitacion (
   codigo TEXT PRIMARY KEY, nombre TEXT, comprador TEXT, estado TEXT, fecha TEXT,
   tipo TEXT, moneda TEXT, conversion_rate REAL, monto_estimado REAL,
-  anio INTEGER, mes INTEGER, region TEXT, adjudicada INTEGER
+  anio INTEGER, mes INTEGER, region TEXT, adjudicada INTEGER, origen TEXT DEFAULT 'proveedor'
 );
 """
 
@@ -48,6 +48,11 @@ CREATE TABLE IF NOT EXISTS licitacion (
 def conn():
     c = sqlite3.connect(DB)
     c.executescript(SCHEMA)
+    # migración: agrega 'origen' si la tabla es anterior
+    cols = [r[1] for r in c.execute("PRAGMA table_info(licitacion)")]
+    if "origen" not in cols:
+        c.execute("ALTER TABLE licitacion ADD COLUMN origen TEXT DEFAULT 'proveedor'")
+        c.commit()
     return c
 
 
@@ -340,10 +345,10 @@ def cmd_licitaciones(args):
                 except Exception:  # noqa: BLE001
                     anio, mes = dia.year, dia.month
                 cr = _fx_rate(c, f["moneda"], fecha)
-                c.execute("INSERT OR REPLACE INTO licitacion VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                c.execute("INSERT OR REPLACE INTO licitacion VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                           (cod, f["nombre"], f["comprador"], f["estado"], fecha, f["tipo"],
                            f["moneda"], cr, f["monto_estimado"], anio, mes,
-                           _region_de(c, f["comprador"]), f["adjudicada"]))
+                           _region_de(c, f["comprador"]), f["adjudicada"], "proveedor"))
                 nuevas += 1
         if dia.day == 1 or dia == hasta:
             c.commit(); print(f"  … {dia}")
@@ -886,6 +891,165 @@ def cmd_resolve_da(args):
         print("(Esos proveedores no tuvieron órdenes en el/los mes(es) usados; prueba con otro mes si te interesa resolverlos.)")
 
 
+# ------------------------------------------------------------ IMPORT LICITACIONES (Datos Abiertos)
+_LIC_ALIASES = {
+    "codigo":    ["CodigoExterno", "Codigo", "CodigoLicitacion", "IdLicitacion"],
+    "nombre":    ["Nombre", "NombreLicitacion", "Descripcion"],
+    "comprador": ["OrganismoPublico", "NombreOrganismo", "Organismo", "UnidadCompra", "NombreUnidadCompra", "Comprador", "sector"],
+    "fecha":     ["FechaPublicacion", "FechaCreacion", "FechaInicio", "Fecha", "FechaCierre"],
+    "estado":    ["Estado", "EstadoLicitacion", "CodigoEstado", "NombreEstado"],
+    "monto":     ["MontoEstimado", "MontoEstimadoLicitacion", "Monto", "MontoTotal", "MontoTotalEstimado"],
+    "tipo":      ["Tipo", "TipoLicitacion", "TipoConvocatoria", "Modalidad"],
+    "region":    ["RegionUnidadCompra", "Region", "RegionOrganismo"],
+    "adjudicada":["FechaAdjudicacion", "NumeroAdjudicaciones"],
+}
+# rubro/categoría del ítem, para detectar traslados
+_LIC_RUBRO_COLS = ["Categoria", "NombreProductoGenerico", "NombreroductoGenerico", "Producto",
+                   "RubroN1", "RubroN2", "RubroN3", "CodigoProductoONU", "codigoProductoONU",
+                   "codigoCategoria", "CodigoCategoria", "Nombre", "Descripcion"]
+_TRASLADO_KEYS = ["ambulancia", "traslado de pacientes", "traslado pacientes", "traslado sanitario",
+                  "servicios de ambulancia", "transporte de pacientes", "traslado clinico"]
+_TRASLADO_ONU = {"92101902", "25101703"}   # servicios de ambulancia / ambulancias
+
+
+def _txtnorm(s):
+    return unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode().lower()
+
+
+def _es_traslado(row, mapa_rubro):
+    for col in mapa_rubro:
+        v = _txtnorm(row.get(col, ""))
+        if any(k in v for k in _TRASLADO_KEYS):
+            return True
+        vs = str(row.get(col, "") or "").strip()
+        if vs in _TRASLADO_ONU:
+            return True
+    return False
+
+
+def cmd_import_lic_da(args):
+    c = conn()
+    origenes = []
+    for u in (args.url or []):
+        u = str(u).strip()
+        if u.lower().startswith(("http://", "https://")):
+            u = u.split()[0]
+        if u:
+            origenes.append(u)
+    if args.dir and os.path.isdir(args.dir):
+        for f in sorted(os.listdir(args.dir)):
+            if f.lower().endswith((".csv", ".gz", ".zip", ".7z")):
+                origenes.append(os.path.join(args.dir, f))
+    if not origenes:
+        print("Sin fuentes. Usa --url <URL de lic-da> o --dir <carpeta>."); return
+
+    total_ins = 0
+    for origen in origenes:
+        try:
+            descargado = _origen_a_path(origen)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! No se pudo descargar {origen}: {e}", flush=True); continue
+        csv_path, temporales = _preparar_csv(descargado)
+        enc = _sniff_encoding(csv_path)
+        print(f"    codificación: {enc}", flush=True)
+        fh = open(csv_path, encoding=enc, errors="replace")
+        try:
+            muestra = fh.readline()
+            sep = ";" if muestra.count(";") >= muestra.count(",") else ","
+            header = next(csv.reader([muestra], delimiter=sep))
+            mapa = _mapear_columnas_lic(header)
+            # columnas de rubro presentes en este archivo
+            norm2real = {_colnorm(h): h for h in header}
+            mapa_rubro = [norm2real[_colnorm(x)] for x in _LIC_RUBRO_COLS if _colnorm(x) in norm2real]
+            print(f"\n  Fuente: {os.path.basename(str(origen))} · sep '{sep}' · {len(header)} columnas")
+            print(f"  Mapeo: {mapa}")
+            print(f"  Columnas de rubro para detectar traslado: {mapa_rubro}", flush=True)
+            if args.dry_run:
+                print(f"  CABECERA COMPLETA: {header}", flush=True)
+            faltan = [k for k in ("codigo", "monto", "fecha") if k not in mapa]
+            if faltan:
+                print(f"  ! Faltan columnas clave: {faltan}. Cabecera: {header}")
+                print("  ! Ajusta _LIC_ALIASES y reintenta."); continue
+
+            reader = csv.DictReader(fh, fieldnames=header, delimiter=sep)
+            vistos = {}      # codigo -> True si algún ítem es de traslado
+            filas = {}       # codigo -> datos de la licitación (última fila vista)
+            leidas = 0; match_items = 0; ejemplo = None
+            for row in reader:
+                leidas += 1
+                if args.limit and leidas > args.limit:
+                    break
+                cod = str(row.get(mapa["codigo"]) or "").strip()
+                if not cod:
+                    continue
+                es = _es_traslado(row, mapa_rubro)
+                if es:
+                    match_items += 1
+                    if args.dry_run and ejemplo is None:
+                        ejemplo = {k: str(v)[:60] for k, v in row.items() if str(v or "").strip()}
+                vistos[cod] = vistos.get(cod, False) or es
+                filas[cod] = row
+            traslado_codes = [k for k, v in vistos.items() if v]
+            print(f"  Leídas {leidas} filas · {match_items} ítems de traslado · {len(traslado_codes)} licitaciones de traslado", flush=True)
+            if args.dry_run and ejemplo:
+                print("  EJEMPLO (primer ítem de traslado):")
+                for k, v in ejemplo.items():
+                    print(f"      {k} = {v}")
+            if args.dry_run:
+                continue
+
+            ins = 0
+            for cod in traslado_codes:
+                row = filas[cod]
+                fecha = _parse_fecha(row.get(mapa["fecha"])) or ""
+                anio = int(fecha[:4]) if fecha[:4].isdigit() else 0
+                mes = int(fecha[5:7]) if fecha[5:7].isdigit() else 0
+                comprador = str(row.get(mapa.get("comprador", ""), "") or "").strip()
+                region = _region_de(c, comprador)
+                if region == "Sin Region":
+                    region = (_region_corta(row.get(mapa["region"])) if mapa.get("region") else None) or "Sin Region"
+                adj = row.get(mapa.get("adjudicada", ""), "")
+                adjudicada = 1 if str(adj or "").strip() not in ("", "0", "NA", "None") else 0
+                c.execute("INSERT OR REPLACE INTO licitacion VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+                    cod,
+                    str(row.get(mapa.get("nombre", ""), "") or "").strip(),
+                    comprador,
+                    str(row.get(mapa.get("estado", ""), "") or "").strip(),
+                    fecha,
+                    str(row.get(mapa.get("tipo", ""), "") or "").strip(),
+                    "CLP", 1.0, _parse_monto(row.get(mapa["monto"])),
+                    anio, mes, region, adjudicada, "mercado"))
+                ins += 1
+            c.commit(); total_ins += ins
+            print(f"  Insertadas/actualizadas {ins} licitaciones de traslado.", flush=True)
+        finally:
+            fh.close()
+            for t in temporales:
+                d = os.path.dirname(t)
+                if os.path.exists(t):
+                    os.remove(t)
+                if d.startswith(tempfile.gettempdir()) and os.path.isdir(d) and not os.listdir(d):
+                    os.rmdir(d)
+            if descargado != origen and os.path.exists(descargado):
+                os.remove(descargado)
+    if not args.dry_run:
+        n = c.execute("SELECT COUNT(*) FROM licitacion WHERE origen='mercado'").fetchone()[0]
+        print(f"\nListo. {total_ins} licitaciones incorporadas. Total de mercado: {n}.", flush=True)
+    else:
+        print("\nModo prueba (dry-run): nada se guardó. Revisa el mapeo y el conteo de traslado.", flush=True)
+
+
+def _mapear_columnas_lic(header):
+    norm2real = {_colnorm(h): h for h in header}
+    mapa = {}
+    for campo, alias in _LIC_ALIASES.items():
+        for a in alias:
+            real = norm2real.get(_colnorm(a))
+            if real is not None:
+                mapa[campo] = real; break
+    return mapa
+
+
 def cmd_run(args):
     cmd_resolve(args); cmd_update(args)
     if getattr(args, "sugerencias", 0):
@@ -918,6 +1082,12 @@ def main():
     da.add_argument("--dry-run", action="store_true", help="Solo muestra el mapeo de columnas y cuenta, sin guardar.")
     da.add_argument("--limit", type=int, default=0, help="Procesa solo las primeras N filas (para pruebas).")
     da.set_defaults(func=cmd_import_da)
+    lda = sub.add_parser("import-lic-da", help="Importa licitaciones de traslado desde Datos Abiertos (lic-da), filtrando por rubro.")
+    lda.add_argument("--url", action="append", help="URL de un archivo de lic-da (repetible).")
+    lda.add_argument("--dir", default="lic_abiertos", help="Carpeta con archivos (por defecto: lic_abiertos).")
+    lda.add_argument("--dry-run", action="store_true", help="Solo muestra mapeo, cabecera y conteo de traslado.")
+    lda.add_argument("--limit", type=int, default=0, help="Procesa solo las primeras N filas (para pruebas).")
+    lda.set_defaults(func=cmd_import_lic_da)
     ca = sub.add_parser("candidates"); ca.add_argument("--desde"); ca.add_argument("--hasta")
     ca.add_argument("--dias", type=int, default=30); ca.set_defaults(func=cmd_candidates)
     li = sub.add_parser("licitaciones"); li.add_argument("--desde"); li.add_argument("--hasta")

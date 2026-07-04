@@ -915,15 +915,14 @@ _LIC_RUBRO_COLS = ["CodigoProductoONU", "codigoProductoONU", "Nombre producto ge
                    "Nombre", "Descripcion", "Descripcion linea Adquisicion"]
 # servicios de traslado de pacientes (el mercado de UCM)
 _SERVICIO_ONU = {"92101902"}          # "Servicios de ambulancia"
-_SERVICIO_KEYS = ["traslado de pacientes", "traslado pacientes", "transporte de pacientes",
-                  "servicio de ambulancia", "servicios de ambulancia", "traslado asistido",
-                  "traslado clinico", "traslado sanitario", "servicio de traslado",
-                  "traslado de urgencia", "transporte asistido", "atencion prehospitalaria"]
 _VEHICULO_ONU = {"25101703"}          # "Ambulancias" (vehículo)
-# señales en el NOMBRE/DESCRIPCIÓN de la licitación (su objeto)
-_NAME_TRASLADO = ["traslado", "ambulancia", "transporte de paciente", "prehospitalaria",
-                  "transporte de enfermo", "traslado de pacientes"]
-_NAME_VEHICULO = ["compra", "adquisicion", "mantencion", "mantenimiento", "reparacion", "renovacion"]
+# contexto médico que convierte un "traslado/transporte" en traslado de pacientes
+_MED = ["paciente", "clinico", "asistido", "sanitario", "prehospital", "enfermo",
+        "dializ", "hospital", "samu", "urgencia", "medic", "cardio", "neonatal", "hemodial"]
+# la ambulancia aparece pero el objeto NO es el servicio de traslado
+_VEH_WORDS = ["compra", "adquisicion", "mantencion", "mantenimiento", "reparacion", "renovacion", "repotenc"]
+_OTRO_WORDS = ["seguro", "poliza", "aseo", "limpieza", "repuesto", "suministro", "insumo",
+               "camilla", "pintura", "gps", "desabolla", "neumatico"]
 
 
 def _txtnorm(s):
@@ -931,23 +930,26 @@ def _txtnorm(s):
 
 
 def _clasificar_traslado(row, obj_cols, line_cols):
-    """'servicio' (traslado de pacientes), 'incidental' (ambulancia como línea de otro contrato),
-    'vehiculo' (compra/mantención) o None."""
-    objblob = " ".join(_txtnorm(row.get(c, "")) for c in obj_cols)
-    codes = set(); linetxt = []
+    """'servicio' (traslado de pacientes), 'incidental' (ambulancia como línea de otro contrato o
+    accesorio), 'vehiculo' (compra/mantención) o None. Se basa en el NOMBRE de la licitación."""
+    name = " ".join(_txtnorm(row.get(c, "")) for c in obj_cols)
+    codes = set()
     for col in line_cols:
         raw = str(row.get(col, "") or "").strip()
         if raw:
-            codes.add(raw); linetxt.append(_txtnorm(raw))
-    lineblob = " ".join(linetxt)
-    amb_en_nombre = any(k in objblob for k in _NAME_TRASLADO)
-    es_vehiculo_nombre = ("ambulancia" in objblob) and any(k in objblob for k in _NAME_VEHICULO)
-    if es_vehiculo_nombre or ((_VEHICULO_ONU & codes) and not amb_en_nombre and not (_SERVICIO_ONU & codes)):
-        return "vehiculo"
-    if amb_en_nombre:
+            codes.add(raw)
+    if "ambulancia" in name:
+        if any(v in name for v in _VEH_WORDS):
+            return "vehiculo"
+        if any(o in name for o in _OTRO_WORDS):
+            return "incidental"
         return "servicio"
-    if (_SERVICIO_ONU & codes) or any(k in lineblob for k in _SERVICIO_KEYS):
-        return "incidental"
+    if ("traslado" in name or "transporte" in name) and any(m in name for m in _MED):
+        return "servicio"
+    if (_VEHICULO_ONU & codes) and any(v in name for v in _VEH_WORDS):
+        return "vehiculo"
+    if _SERVICIO_ONU & codes:
+        return "incidental"       # línea de ambulancia dentro de un contrato de otra cosa
     return None
 
 
@@ -971,8 +973,19 @@ def cmd_import_lic_da(args):
         for f in sorted(os.listdir(args.dir)):
             if f.lower().endswith((".csv", ".gz", ".zip", ".7z")):
                 origenes.append(os.path.join(args.dir, f))
+    desde = getattr(args, "desde", None); hasta = getattr(args, "hasta", None)
+    if desde and hasta:
+        try:
+            y, m = (int(x) for x in desde.split("-")); y2, m2 = (int(x) for x in hasta.split("-"))
+            while (y, m) <= (y2, m2):
+                origenes.append(f"https://transparenciachc.blob.core.windows.net/lic-da/{y}-{m}.zip")
+                m += 1
+                if m > 12:
+                    m = 1; y += 1
+        except ValueError:
+            print("  ! --desde/--hasta deben ser AÑO-MES, ej: 2023-1"); return
     if not origenes:
-        print("Sin fuentes. Usa --url <URL de lic-da> o --dir <carpeta>."); return
+        print("Sin fuentes. Usa --url <URL o AÑO-MES>, --desde/--hasta, o --dir <carpeta>."); return
 
     total_ins = 0
     for origen in origenes:
@@ -980,11 +993,12 @@ def cmd_import_lic_da(args):
             descargado = _origen_a_path(origen)
         except Exception as e:  # noqa: BLE001
             print(f"  ! No se pudo descargar {origen}: {e}", flush=True); continue
-        csv_path, temporales = _preparar_csv(descargado)
-        enc = _sniff_encoding(csv_path)
-        print(f"    codificación: {enc}", flush=True)
-        fh = open(csv_path, encoding=enc, errors="replace")
+        temporales = []; fh = None
         try:
+            csv_path, temporales = _preparar_csv(descargado)
+            enc = _sniff_encoding(csv_path)
+            print(f"    codificación: {enc}", flush=True)
+            fh = open(csv_path, encoding=enc, errors="replace")
             muestra = fh.readline()
             sep = ";" if muestra.count(";") >= muestra.count(",") else ","
             header = next(csv.reader([muestra], delimiter=sep))
@@ -1071,8 +1085,11 @@ def cmd_import_lic_da(args):
                 ins += 1
             c.commit(); total_ins += ins
             print(f"  Insertadas/actualizadas {ins} licitaciones de traslado.", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! Error procesando {origen}: {e} (se omite y se continúa)", flush=True)
         finally:
-            fh.close()
+            if fh:
+                fh.close()
             for t in temporales:
                 d = os.path.dirname(t)
                 if os.path.exists(t):
@@ -1132,7 +1149,9 @@ def main():
     da.add_argument("--limit", type=int, default=0, help="Procesa solo las primeras N filas (para pruebas).")
     da.set_defaults(func=cmd_import_da)
     lda = sub.add_parser("import-lic-da", help="Importa licitaciones de traslado desde Datos Abiertos (lic-da), filtrando por rubro.")
-    lda.add_argument("--url", action="append", help="URL de un archivo de lic-da (repetible).")
+    lda.add_argument("--url", action="append", help="URL o AÑO-MES de un archivo lic-da (repetible). Ej: 2026-6")
+    lda.add_argument("--desde", help="Rango: mes inicial AÑO-MES (ej: 2023-1).")
+    lda.add_argument("--hasta", help="Rango: mes final AÑO-MES (ej: 2026-6).")
     lda.add_argument("--dir", default="lic_abiertos", help="Carpeta con archivos (por defecto: lic_abiertos).")
     lda.add_argument("--dry-run", action="store_true", help="Solo muestra mapeo, cabecera y conteo de traslado.")
     lda.add_argument("--incluir-vehiculos", action="store_true", help="Incluye también compra/mantención de ambulancias.")

@@ -4,7 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: "URL del lic-da (ej: https://transparenciachc.blob.core.windows.net/lic-da/2026-6.zip). Vacío = carpeta lic_abiertos/"
+        description: "Un mes: URL completa o solo AÑO-MES (ej: 2026-6). Vacío = usar rango o carpeta."
+        required: false
+        default: ""
+      desde:
+        description: "Rango (opcional): mes inicial AÑO-MES, ej: 2023-1"
+        required: false
+        default: ""
+      hasta:
+        description: "Rango (opcional): mes final AÑO-MES, ej: 2026-6"
         required: false
         default: ""
       dry_run:
@@ -41,7 +49,9 @@ jobs:
         run: |
           DRY=""
           if [ "${{ inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
-          if [ -n "${{ inputs.url }}" ]; then
+          if [ -n "${{ inputs.desde }}" ] && [ -n "${{ inputs.hasta }}" ]; then
+            python pipeline.py import-lic-da --desde "${{ inputs.desde }}" --hasta "${{ inputs.hasta }}" $DRY
+          elif [ -n "${{ inputs.url }}" ]; then
             python pipeline.py import-lic-da --url "${{ inputs.url }}" $DRY
           else
             python pipeline.py import-lic-da --dir lic_abiertos $DRY

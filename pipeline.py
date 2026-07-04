@@ -220,11 +220,14 @@ def cmd_update(args):
                 except Exception:  # noqa: BLE001
                     anio, mes = dia.year, dia.month
                 cr = _fx_rate(c, f["moneda"], fecha)  # CLP=1; UF/UTM por fecha
+                region = _region_de(c, f["comprador"])
+                if region == "Sin Region":
+                    region = _region_corta(f.get("region_texto")) or "Sin Region"
                 c.execute("INSERT OR REPLACE INTO oc VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                           (cod, f["nombre"], f["comprador"], f["rut_comprador"], fecha,
                            f["proveedor"] or p["alias"], f["rut_proveedor"] or p["rut"],
                            f["estado"], f["moneda"], cr, f["monto_bruto"], f["tipo_orden"],
-                           anio, mes, _region_de(c, f["comprador"])))
+                           anio, mes, region))
                 nuevas += 1
         ok += d_ok; err += d_err
         c.commit()

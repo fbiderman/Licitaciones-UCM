@@ -12,7 +12,7 @@ Antes de la primera corrida real, ejecuta `python pipeline.py probe <codigo_oc>`
 una respuesta cruda y ajustar el mapeo si algún campo no coincide.
 """
 from __future__ import annotations
-import os, time, json, unicodedata, urllib.parse, urllib.request
+import os, re, time, json, unicodedata, urllib.parse, urllib.request
 
 BASE = "https://api.mercadopublico.cl/servicios/v1/publico"
 BASE_EMP = "https://api.mercadopublico.cl/servicios/v1/Publico/Empresas"
@@ -157,8 +157,9 @@ def extraer_campos(oc: dict) -> dict:
     fecha_txt = _first(fechas, "FechaEnvio", "FechaCreacion", "FechaAceptacion") \
         or _first(oc, "FechaEnvio", "FechaCreacion", default="")
 
+    codigo = _first(oc, "Codigo", "codigo", default="")
     return {
-        "codigo": _first(oc, "Codigo", "codigo", default=""),
+        "codigo": codigo,
         "nombre": _first(oc, "Nombre", "nombre", default=""),
         "comprador": _first(comprador, "NombreOrganismo", "Nombre", "nombreOrganismo", default=""),
         "rut_comprador": _first(comprador, "RutUnidad", "RutSucursal", "Rut", default=""),
@@ -168,8 +169,29 @@ def extraer_campos(oc: dict) -> dict:
         "estado": estado,
         "moneda": str(moneda).upper(),
         "monto_bruto": float(total),
-        "tipo_orden": _first(oc, "Tipo", "tipo", "TipoDespachoOC", default="") or "Sin Clasificacion",
+        "tipo_orden": _tipo_oc(oc, codigo),
+        "region_texto": _first(comprador, "RegionUnidad", "Region", "RegionUnidadCompra", default=""),
     }
+
+
+def _tipo_oc(oc: dict, codigo: str) -> str:
+    """Deriva el tipo a las categorías del histórico, igual que la carga de Datos Abiertos."""
+    ab = str(_first(oc, "Tipo", "CodigoAbreviadoTipoOC", default="") or "").strip().upper()
+    if not ab and codigo:
+        m = re.search(r"-([A-Z]+)\d*$", str(codigo))       # sufijo del código: ...-SE26 -> SE
+        ab = m.group(1) if m else ""
+    if ab == "AG":
+        return "Compra Agil"
+    if ab == "TD":
+        return "Trato Directo"
+    if ab == "CM":
+        return "Convenio Marco"
+    tiene_lic = bool(str(_first(oc, "CodigoLicitacion", default="") or "").strip())
+    if ab == "SE" and tiene_lic:
+        return "Licitacion"
+    if ab.startswith("L"):     # L1, LE, LP, LQ, LR: derivadas de licitación
+        return "Licitacion"
+    return "Sin Clasificacion"
 
 
 # estados de licitación -> texto

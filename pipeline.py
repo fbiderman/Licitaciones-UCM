@@ -954,10 +954,17 @@ def _clasificar_traslado(row, obj_cols, line_cols):
 def cmd_import_lic_da(args):
     c = conn()
     origenes = []
+    _LIC_BASE = "https://transparenciachc.blob.core.windows.net/lic-da/"
     for u in (args.url or []):
         u = str(u).strip()
         if u.lower().startswith(("http://", "https://")):
             u = u.split()[0]
+        elif u and not os.path.exists(u):
+            m = re.match(r"^(?:lic-da/)?(\d{4}-\d{1,2})(?:\.zip)?$", u)
+            if m:
+                u = _LIC_BASE + m.group(1) + ".zip"
+            elif u.startswith("lic-da/"):
+                u = "https://transparenciachc.blob.core.windows.net/" + u
         if u:
             origenes.append(u)
     if args.dir and os.path.isdir(args.dir):

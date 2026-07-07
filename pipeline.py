@@ -450,6 +450,25 @@ def cmd_build(args):
     data_through = c.execute("SELECT MAX(fecha) FROM oc").fetchone()[0] or snap
 
     # ---- licitaciones (dos orígenes) con campos ricos ----
+    def _dur_meses(dur, unidad):
+        if not dur:
+            return 0
+        u = str(unidad or "").strip()
+        # códigos observados: 4 = meses. Otros aproximados.
+        factor = {"4": 1, "5": 12, "3": 0.2306, "2": 0.0329, "1": 0.00137}.get(u, 1)
+        return int(round(dur * factor))
+
+    def _add_months(iso, months):
+        if not (iso and len(iso) >= 7 and months):
+            return ""
+        try:
+            y, m = int(iso[:4]), int(iso[5:7]); d = iso[8:10] or "01"
+            total = (y * 12 + (m - 1)) + int(months)
+            ny, nm = total // 12, total % 12 + 1
+            return f"{ny:04d}-{nm:02d}-{d if d else '01'}"
+        except (ValueError, TypeError):
+            return ""
+
     lc, lr, le, lsub, ladj = {}, {}, {}, {}, {}
     lic_rows = []
     for (orig, a, mm, cp, rg, es, monto, adjd, cod, nom, fch, sub, adjn,
@@ -459,14 +478,16 @@ def cmd_build(args):
                    subtipo,adjudicatario,monto_adjudicado,fecha_inicio,fecha_final,
                    fecha_adjudicacion,duracion,duracion_unidad,renovable
             FROM licitacion"""):
+        meses = _dur_meses(int(dur) if str(dur or "").strip().lstrip("-").isdigit() else 0, durU)
+        ancla = (fadj or "")[:10] or (fini or "")[:10]
+        vence = _add_months(ancla, meses)
         lic_rows.append([
             0 if (orig or "mercado") == "mercado" else 1,
             int(a or 0), int(mm or 0), idx(lc, cp or ""), idx(lr, rg or "Sin Region"),
             idx(le, es or ""), round(float(monto or 0)), int(adjd or 0),
             cod or "", nom or "", (fch or "")[:10],
             idx(lsub, sub or "general"), idx(ladj, adjn or ""), round(float(madj or 0)),
-            (fini or "")[:10], (fadj or "")[:10], int(dur) if str(dur or "").strip().isdigit() else 0,
-            (durU or ""), (1 if renov == 1 else (0 if renov == 0 else -1)), (ffin or "")[:10]])
+            (fadj or "")[:10], meses, (1 if renov == 1 else (0 if renov == 0 else -1)), vence])
     lic = {"comp": inv(lc), "reg": inv(lr), "est": inv(le), "sub": inv(lsub),
            "adj": inv(ladj), "rows": lic_rows}
 
@@ -987,6 +1008,10 @@ def _subtipo_traslado(name):
 
 def cmd_import_lic_da(args):
     c = conn()
+    if getattr(args, "reset", False) and not args.dry_run:
+        n = c.execute("DELETE FROM licitacion WHERE origen='mercado'").rowcount
+        c.commit()
+        print(f"  reset: eliminadas {n} licitaciones de mercado previas.", flush=True)
     origenes = []
     _LIC_BASE = "https://transparenciachc.blob.core.windows.net/lic-da/"
     for u in (args.url or []):
@@ -1049,7 +1074,7 @@ def cmd_import_lic_da(args):
             col_sel = pick("Oferta seleccionada", "Estado Oferta")
             col_prov = pick("RazonSocialProveedor", "NombreProveedor")
             col_rut = pick("RutProveedor")
-            col_madj = pick("MontoLineaAdjudica", "Monto Estimado Adjudicado", "Valor Total Ofertado")
+            col_madj = pick("Monto Estimado Adjudicado", "MontoLineaAdjudica", "Valor Total Ofertado")
             col_ini = pick("FechaInicio")
             col_fin = pick("FechaFinal")
             col_fadj = pick("FechaAdjudicacion")
@@ -1254,6 +1279,7 @@ def main():
     lda.add_argument("--dry-run", action="store_true", help="Solo muestra mapeo, cabecera y conteo de traslado.")
     lda.add_argument("--incluir-vehiculos", action="store_true", help="Incluye también compra/mantención de ambulancias.")
     lda.add_argument("--incluir-incidentales", action="store_true", help="Incluye contratos donde la ambulancia es solo una línea (eventos, etc.).")
+    lda.add_argument("--reset", action="store_true", help="Borra las licitaciones de mercado previas antes de cargar (para recargar limpio).")
     lda.add_argument("--limit", type=int, default=0, help="Procesa solo las primeras N filas (para pruebas).")
     lda.set_defaults(func=cmd_import_lic_da)
     ca = sub.add_parser("candidates"); ca.add_argument("--desde"); ca.add_argument("--hasta")

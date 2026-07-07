@@ -40,19 +40,29 @@ CREATE TABLE IF NOT EXISTS candidates (
 CREATE TABLE IF NOT EXISTS licitacion (
   codigo TEXT PRIMARY KEY, nombre TEXT, comprador TEXT, estado TEXT, fecha TEXT,
   tipo TEXT, moneda TEXT, conversion_rate REAL, monto_estimado REAL,
-  anio INTEGER, mes INTEGER, region TEXT, adjudicada INTEGER, origen TEXT DEFAULT 'proveedor'
+  anio INTEGER, mes INTEGER, region TEXT, adjudicada INTEGER, origen TEXT DEFAULT 'proveedor',
+  subtipo TEXT, adjudicatario TEXT, rut_adjudicatario TEXT, monto_adjudicado REAL,
+  fecha_inicio TEXT, fecha_final TEXT, fecha_adjudicacion TEXT,
+  duracion INTEGER, duracion_unidad TEXT, renovable INTEGER
 );
 """
+
+_LIC_NUEVAS = [  # (columna, tipo) para migración
+    ("origen", "TEXT DEFAULT 'proveedor'"), ("subtipo", "TEXT"), ("adjudicatario", "TEXT"),
+    ("rut_adjudicatario", "TEXT"), ("monto_adjudicado", "REAL"), ("fecha_inicio", "TEXT"),
+    ("fecha_final", "TEXT"), ("fecha_adjudicacion", "TEXT"), ("duracion", "INTEGER"),
+    ("duracion_unidad", "TEXT"), ("renovable", "INTEGER"),
+]
 
 
 def conn():
     c = sqlite3.connect(DB)
     c.executescript(SCHEMA)
-    # migración: agrega 'origen' si la tabla es anterior
-    cols = [r[1] for r in c.execute("PRAGMA table_info(licitacion)")]
-    if "origen" not in cols:
-        c.execute("ALTER TABLE licitacion ADD COLUMN origen TEXT DEFAULT 'proveedor'")
-        c.commit()
+    lic_cols = [r[1] for r in c.execute("PRAGMA table_info(licitacion)")]
+    for col, decl in _LIC_NUEVAS:
+        if col not in lic_cols:
+            c.execute(f"ALTER TABLE licitacion ADD COLUMN {col} {decl}")
+    c.commit()
     return c
 
 
@@ -345,10 +355,14 @@ def cmd_licitaciones(args):
                 except Exception:  # noqa: BLE001
                     anio, mes = dia.year, dia.month
                 cr = _fx_rate(c, f["moneda"], fecha)
-                c.execute("INSERT OR REPLACE INTO licitacion VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                c.execute("""INSERT OR REPLACE INTO licitacion
+                    (codigo,nombre,comprador,estado,fecha,tipo,moneda,conversion_rate,monto_estimado,
+                     anio,mes,region,adjudicada,origen,subtipo)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                           (cod, f["nombre"], f["comprador"], f["estado"], fecha, f["tipo"],
                            f["moneda"], cr, f["monto_estimado"], anio, mes,
-                           _region_de(c, f["comprador"]), f["adjudicada"], "proveedor"))
+                           _region_de(c, f["comprador"]), f["adjudicada"], "proveedor",
+                           _subtipo_traslado(f["nombre"])))
                 nuevas += 1
         if dia.day == 1 or dia == hasta:
             c.commit(); print(f"  … {dia}")
@@ -435,18 +449,26 @@ def cmd_build(args):
                [dt.datetime.now().isoformat(timespec="seconds")])[0]
     data_through = c.execute("SELECT MAX(fecha) FROM oc").fetchone()[0] or snap
 
-    # ---- licitaciones (dos orígenes: 'mercado' y 'proveedor') ----
-    lc, lr, le = {}, {}, {}
+    # ---- licitaciones (dos orígenes) con campos ricos ----
+    lc, lr, le, lsub, ladj = {}, {}, {}, {}, {}
     lic_rows = []
-    for orig, a, mm, cp, rg, es, monto, adj, cod, nom, fch in c.execute("""
+    for (orig, a, mm, cp, rg, es, monto, adjd, cod, nom, fch, sub, adjn,
+         madj, fini, ffin, fadj, dur, durU, renov) in c.execute("""
             SELECT origen,anio,mes,comprador,region,estado,
-                   monto_estimado*COALESCE(conversion_rate,1),adjudicada,codigo,nombre,fecha
+                   monto_estimado*COALESCE(conversion_rate,1),adjudicada,codigo,nombre,fecha,
+                   subtipo,adjudicatario,monto_adjudicado,fecha_inicio,fecha_final,
+                   fecha_adjudicacion,duracion,duracion_unidad,renovable
             FROM licitacion"""):
-        lic_rows.append([0 if (orig or "mercado") == "mercado" else 1,
-                         int(a or 0), int(mm or 0), idx(lc, cp or ""), idx(lr, rg or "Sin Region"),
-                         idx(le, es or ""), round(float(monto or 0)), int(adj or 0),
-                         cod or "", nom or "", (fch or "")[:10]])
-    lic = {"comp": inv(lc), "reg": inv(lr), "est": inv(le), "rows": lic_rows}
+        lic_rows.append([
+            0 if (orig or "mercado") == "mercado" else 1,
+            int(a or 0), int(mm or 0), idx(lc, cp or ""), idx(lr, rg or "Sin Region"),
+            idx(le, es or ""), round(float(monto or 0)), int(adjd or 0),
+            cod or "", nom or "", (fch or "")[:10],
+            idx(lsub, sub or "general"), idx(ladj, adjn or ""), round(float(madj or 0)),
+            (fini or "")[:10], (fadj or "")[:10], int(dur) if str(dur or "").strip().isdigit() else 0,
+            (durU or ""), (1 if renov == 1 else (0 if renov == 0 else -1)), (ffin or "")[:10]])
+    lic = {"comp": inv(lc), "reg": inv(lr), "est": inv(le), "sub": inv(lsub),
+           "adj": inv(ladj), "rows": lic_rows}
 
     data = {"meta": {"source": "Mercado Publico - Traslados", "snapshot": snap,
                      "updated": updated, "data_through": data_through,
@@ -913,13 +935,14 @@ _LIC_RUBRO_COLS = ["CodigoProductoONU", "codigoProductoONU", "Nombre producto ge
 # servicios de traslado de pacientes (el mercado de UCM)
 _SERVICIO_ONU = {"92101902"}          # "Servicios de ambulancia"
 _VEHICULO_ONU = {"25101703"}          # "Ambulancias" (vehículo)
-# contexto médico que convierte un "traslado/transporte" en traslado de pacientes
-_MED = ["paciente", "clinico", "asistido", "sanitario", "prehospital", "enfermo",
-        "dializ", "hospital", "samu", "urgencia", "medic", "cardio", "neonatal", "hemodial"]
+# términos que confirman traslado DE PACIENTES (no de personal/carga/muestras)
+_MED = ["paciente", "enfermo", "dializ", "hemodial", "prehospital", "ambulatorio",
+        "herido", "lesionado", "neonatal", "urgencia medic", "soporte vital"]
 # la ambulancia aparece pero el objeto NO es el servicio de traslado
 _VEH_WORDS = ["compra", "adquisicion", "mantencion", "mantenimiento", "reparacion", "renovacion", "repotenc"]
 _OTRO_WORDS = ["seguro", "poliza", "aseo", "limpieza", "repuesto", "suministro", "insumo",
-               "camilla", "pintura", "gps", "desabolla", "neumatico"]
+               "camilla", "pintura", "gps", "desabolla", "neumatico", "uniforme", "vestuario",
+               "personal de ambulancia", "capacita", "curso", "software", "combustible", "lavado"]
 
 
 def _txtnorm(s):
@@ -927,8 +950,7 @@ def _txtnorm(s):
 
 
 def _clasificar_traslado(row, obj_cols, line_cols):
-    """'servicio' (traslado de pacientes), 'incidental' (ambulancia como línea de otro contrato o
-    accesorio), 'vehiculo' (compra/mantención) o None. Se basa en el NOMBRE de la licitación."""
+    """'servicio' (traslado de pacientes), 'incidental', 'vehiculo' o None. Basado en el NOMBRE."""
     name = " ".join(_txtnorm(row.get(c, "")) for c in obj_cols)
     codes = set()
     for col in line_cols:
@@ -946,8 +968,21 @@ def _clasificar_traslado(row, obj_cols, line_cols):
     if (_VEHICULO_ONU & codes) and any(v in name for v in _VEH_WORDS):
         return "vehiculo"
     if _SERVICIO_ONU & codes:
-        return "incidental"       # línea de ambulancia dentro de un contrato de otra cosa
+        return "incidental"       # ambulancia solo como línea de otro contrato
     return None
+
+
+def _subtipo_traslado(name):
+    """Clasifica el servicio: 'avanzado', 'basico', 'arriendo' o 'general'."""
+    n = _txtnorm(name)
+    if any(k in n for k in ["avanzado", "soporte vital avanzado", " sva", "medicaliz", "uci movil",
+                            "cuidados intensivos", "alta complejidad", "critico"]):
+        return "avanzado"
+    if any(k in n for k in ["basico", "soporte vital basico", " svb", "baja complejidad", "simple"]):
+        return "basico"
+    if any(k in n for k in ["arriendo", "arrendamiento", "alquiler"]):
+        return "arriendo"
+    return "general"
 
 
 def cmd_import_lic_da(args):
@@ -1004,11 +1039,30 @@ def cmd_import_lic_da(args):
             norm2real = {_colnorm(h): h for h in header}
             mapa_rubro = [norm2real[_colnorm(x)] for x in _LIC_RUBRO_COLS if _colnorm(x) in norm2real]
             obj_cols = [mapa[k] for k in ("nombre",) if k in mapa]
+
+            def pick(*cands):
+                for x in cands:
+                    r = norm2real.get(_colnorm(x))
+                    if r:
+                        return r
+                return None
+            col_sel = pick("Oferta seleccionada", "Estado Oferta")
+            col_prov = pick("RazonSocialProveedor", "NombreProveedor")
+            col_rut = pick("RutProveedor")
+            col_madj = pick("MontoLineaAdjudica", "Monto Estimado Adjudicado", "Valor Total Ofertado")
+            col_ini = pick("FechaInicio")
+            col_fin = pick("FechaFinal")
+            col_fadj = pick("FechaAdjudicacion")
+            col_dur = pick("TiempoDuracionContrato")
+            col_durU = pick("UnidadTiempoDuracionContrato")
+            col_renov = pick("EsRenovable")
+
             print(f"\n  Fuente: {os.path.basename(str(origen))} · sep '{sep}' · {len(header)} columnas")
             print(f"  Mapeo: {mapa}")
             print(f"  Objeto (nombre/desc): {obj_cols} · rubro de línea: {mapa_rubro}", flush=True)
             if args.dry_run:
-                print(f"  CABECERA COMPLETA: {header}", flush=True)
+                print(f"  Campos ricos → adjudicatario:{col_prov} rut:{col_rut} montoAdj:{col_madj} "
+                      f"inicio:{col_ini} final:{col_fin} fechaAdj:{col_fadj} dur:{col_dur} durU:{col_durU} renov:{col_renov}", flush=True)
             faltan = [k for k in ("codigo", "monto", "fecha") if k not in mapa]
             if faltan:
                 print(f"  ! Faltan columnas clave: {faltan}. Cabecera: {header}")
@@ -1017,8 +1071,9 @@ def cmd_import_lic_da(args):
             reader = csv.DictReader(fh, fieldnames=header, delimiter=sep)
             PRIOR = {"servicio": 3, "incidental": 2, "vehiculo": 1}
             cat = {}         # codigo -> mejor categoría vista
-            filas = {}       # codigo -> última fila vista
+            filas = {}       # codigo -> última fila vista (campos a nivel licitación)
             nombres = {}     # codigo -> nombre
+            adjud = {}       # codigo -> {"nombre","rut","monto"} del/los oferentes seleccionados
             leidas = 0
             for row in reader:
                 leidas += 1
@@ -1034,6 +1089,18 @@ def cmd_import_lic_da(args):
                     cat[cod] = cl
                 filas[cod] = row
                 nombres[cod] = str(row.get(mapa.get("nombre", ""), "") or "").strip()
+                # adjudicatario: oferta seleccionada / aceptada
+                if col_sel:
+                    sel_val = _txtnorm(row.get(col_sel, ""))
+                    if "seleccionada" in sel_val or sel_val == "aceptada":
+                        prov = str(row.get(col_prov, "") or "").strip() if col_prov else ""
+                        montoadj = _parse_monto(row.get(col_madj)) if col_madj else 0.0
+                        d = adjud.setdefault(cod, {"nombre": "", "rut": "", "monto": 0.0, "cand": {}})
+                        d["monto"] += montoadj
+                        if prov:
+                            d["cand"][prov] = d["cand"].get(prov, 0.0) + montoadj
+                            if col_rut and not d["rut"]:
+                                d["rut"] = str(row.get(col_rut, "") or "").strip()
             serv = [k for k, v in cat.items() if v == "servicio"]
             inci = [k for k, v in cat.items() if v == "incidental"]
             veh = [k for k, v in cat.items() if v == "vehiculo"]
@@ -1051,11 +1118,26 @@ def cmd_import_lic_da(args):
             if args.dry_run:
                 print("  NOMBRES de 'traslado de pacientes' (hasta 25):")
                 for cod in serv[:25]:
-                    print(f"      · [{cod}] {nombres[cod][:80]}")
+                    st = _subtipo_traslado(nombres[cod])
+                    print(f"      · [{cod}] ({st}) {nombres[cod][:72]}")
                 if inci:
                     print("  NOMBRES marcados 'incidental' (hasta 10, para verificar el corte):")
                     for cod in inci[:10]:
                         print(f"      · [{cod}] {nombres[cod][:80]}")
+                print("  CAMPOS DE CONTRATO/ADJUDICACIÓN (primeros 6 con adjudicatario):")
+                shown = 0
+                for cod in serv:
+                    row = filas[cod]; a = adjud.get(cod, {})
+                    if not a.get("cand"):
+                        continue
+                    prov = max(a["cand"].items(), key=lambda kv: kv[1])[0]
+                    print(f"      [{cod}] adj='{prov[:30]}' montoAdj={round(a.get('monto',0))} "
+                          f"ini={row.get(col_ini) if col_ini else '-'} fin={row.get(col_fin) if col_fin else '-'} "
+                          f"fadj={row.get(col_fadj) if col_fadj else '-'} dur={row.get(col_dur) if col_dur else '-'} "
+                          f"unidad={row.get(col_durU) if col_durU else '-'} renov={row.get(col_renov) if col_renov else '-'}")
+                    shown += 1
+                    if shown >= 6:
+                        break
                 continue
 
             ins = 0
@@ -1070,15 +1152,34 @@ def cmd_import_lic_da(args):
                     region = (_region_corta(row.get(mapa["region"])) if mapa.get("region") else None) or "Sin Region"
                 estado = str(row.get(mapa.get("estado", ""), "") or "").strip()
                 adjudicada = 1 if _txtnorm(estado) == "adjudicada" else 0
-                c.execute("INSERT OR REPLACE INTO licitacion VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
-                    cod,
-                    nombres.get(cod, ""),
-                    comprador,
-                    estado,
-                    fecha,
+                a = adjud.get(cod, {})
+                adj_nombre = ""
+                if a.get("cand"):
+                    adj_nombre = max(a["cand"].items(), key=lambda kv: kv[1])[0]
+                dur = row.get(col_dur) if col_dur else None
+                try:
+                    dur = int(float(str(dur))) if str(dur or "").strip() not in ("", "NA", "None") else None
+                except ValueError:
+                    dur = None
+                renov = None
+                if col_renov:
+                    rv = str(row.get(col_renov, "") or "").strip()
+                    renov = 1 if rv in ("1", "true", "True", "Si", "Sí") else (0 if rv in ("0", "false", "False", "No") else None)
+                c.execute("""INSERT OR REPLACE INTO licitacion
+                    (codigo,nombre,comprador,estado,fecha,tipo,moneda,conversion_rate,monto_estimado,
+                     anio,mes,region,adjudicada,origen,subtipo,adjudicatario,rut_adjudicatario,
+                     monto_adjudicado,fecha_inicio,fecha_final,fecha_adjudicacion,duracion,duracion_unidad,renovable)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                    cod, nombres.get(cod, ""), comprador, estado, fecha,
                     str(row.get(mapa.get("tipo", ""), "") or "").strip(),
                     "CLP", 1.0, _parse_monto(row.get(mapa["monto"])),
-                    anio, mes, region, adjudicada, "mercado"))
+                    anio, mes, region, adjudicada, "mercado",
+                    _subtipo_traslado(nombres.get(cod, "")),
+                    adj_nombre, a.get("rut", ""), round(a.get("monto", 0.0)),
+                    _parse_fecha(row.get(col_ini)) if col_ini else "",
+                    _parse_fecha(row.get(col_fin)) if col_fin else "",
+                    _parse_fecha(row.get(col_fadj)) if col_fadj else "",
+                    dur, str(row.get(col_durU, "") or "").strip() if col_durU else "", renov))
                 ins += 1
             c.commit(); total_ins += ins
             print(f"  Insertadas/actualizadas {ins} licitaciones de traslado.", flush=True)

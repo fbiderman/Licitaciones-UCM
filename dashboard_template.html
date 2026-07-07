@@ -111,6 +111,38 @@
   .est-adj{color:#1f7a3d}.est-des{color:var(--red)}.est-otro{color:var(--slate)}
   .tblwrap{max-height:560px;overflow:auto;border-radius:10px;border:1px solid #eef1f6}
   .tblnote{font-size:12px;color:var(--muted);margin-top:8px}
+  .ranklist{max-height:340px;overflow:auto}
+  .rankrow{display:flex;align-items:center;gap:10px;padding:8px 8px;border-bottom:1px solid #f1f4f8;cursor:pointer;border-radius:8px}
+  .rankrow:hover{background:#f8fbff}
+  .rankrow.on{background:#e8f0fb}
+  .rankrow .nm{flex:1;font-size:13px;color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rankrow .nm.ucm{color:var(--red);font-weight:700}
+  .rankrow .ct{font:700 12px var(--body);color:var(--slate);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .rankrow .mn{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:74px;text-align:right}
+  .fchip{display:inline-flex;align-items:center;gap:6px;background:#e8f0fb;color:var(--blue);font:600 12px var(--body);padding:4px 10px;border-radius:999px;margin-right:6px}
+  .fchip b{font-weight:700}
+  .fchip .x{cursor:pointer;font-weight:700;opacity:.7}
+  .chip.sel{outline:2px solid var(--blue);outline-offset:1px}
+  .chip.click{cursor:pointer}
+  .venc-soon{color:var(--red);font-weight:700}
+  .venc-mid{color:#b8860b;font-weight:600}
+  .ganttwrap{overflow:auto;max-height:560px;border:1px solid #eef1f6;border-radius:10px}
+  .ganttwrap svg{display:block}
+  #lic-horizon .subtab{padding:6px 12px;font-size:12px}
+  .tbl tr.clik{cursor:pointer}
+  .tbl tr.clik.open td{background:#eef3fb;font-weight:600}
+  .tbl td.exp{width:18px;color:var(--blue);font-weight:700}
+  .detrow td{padding:0;background:#f8fbff}
+  .detbox{padding:16px 18px;border-left:3px solid var(--blue)}
+  .detbox h3{font:700 15px var(--disp);color:var(--deep);margin:0 0 12px}
+  .dsec{margin:14px 0}
+  .dsec h4{font:700 11px var(--body);text-transform:uppercase;letter-spacing:.05em;color:var(--blue);margin:0 0 8px}
+  .dgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 24px}
+  .dt{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid #eef1f6;font-size:13px}
+  .dl{color:var(--muted)}
+  .dv{color:var(--ink);text-align:right}
+  .detbox .tbl{margin-top:4px}
+  @media(max-width:700px){.dgrid{grid-template-columns:1fr}}
 
   @media(max-width:860px){
     .kpis{grid-template-columns:repeat(2,1fr)}
@@ -202,30 +234,64 @@
 
     <div class="lic-empty" id="lic-empty" hidden></div>
     <div id="lic-body">
-      <section class="kpis" id="lic-kpis"></section>
-      <div class="controls">
-        <button class="clearf" id="lic-clearf" style="display:none">✕ limpiar filtros</button>
+      <div class="controls" id="lic-filterbar">
         <span class="note" id="lic-note"></span>
+        <span id="lic-chips"></span>
+        <button class="clearf" id="lic-clearf" style="display:none">✕ limpiar filtros</button>
       </div>
+      <section class="kpis" id="lic-kpis"></section>
+
       <section class="card">
         <div class="head"><div><h2><span class="dot"></span>Licitaciones en el tiempo</h2>
           <p class="hint">Monto estimado por año. Haz clic en un año para filtrar.</p></div>
           <div class="yearpill" id="lic-yearPill">Todos los años</div></div>
         <div id="lic-annual"></div>
       </section>
+
+      <div class="two">
+        <section class="card">
+          <div class="head"><div><h2><span class="dot"></span>Tipo de traslado</h2>
+            <p class="hint">Clic para filtrar por tipo.</p></div></div>
+          <div class="chips" id="lic-subtipo"></div>
+        </section>
+        <section class="card">
+          <div class="head"><div><h2><span class="dot"></span>Estado de los procesos</h2>
+            <p class="hint">Cómo terminaron.</p></div></div>
+          <div class="chips" id="lic-estado"></div>
+        </section>
+      </div>
+
+      <div class="two">
+        <section class="card">
+          <div class="head"><div><h2><span class="dot"></span>Compradores</h2>
+            <p class="hint">Quién licita. Clic para ver sus licitaciones.</p></div></div>
+          <div class="searchbar"><input type="search" id="lic-compSearch" placeholder="Buscar comprador…"></div>
+          <div class="ranklist" id="lic-comp"></div>
+        </section>
+        <section class="card">
+          <div class="head"><div><h2><span class="dot"></span>Adjudicatarios</h2>
+            <p class="hint">Quién gana. Clic para ver lo que se adjudicó. UCM en rojo.</p></div></div>
+          <div class="searchbar"><input type="search" id="lic-adjSearch" placeholder="Buscar adjudicatario…"></div>
+          <div class="ranklist" id="lic-adj"></div>
+        </section>
+      </div>
+
       <section class="card">
-        <div class="head"><div><h2><span class="dot"></span>Estado de los procesos</h2>
-          <p class="hint">Cómo terminaron las licitaciones del período seleccionado.</p></div></div>
-        <div class="chips" id="lic-estado"></div>
+        <div class="head"><div><h2><span class="dot"></span>Calendario de vencimientos (Carta Gantt)</h2>
+          <p class="hint">Contratos vigentes ordenados por cuándo se estima que vencen, para anticipar renovaciones.</p></div>
+          <div class="subtabs" id="lic-horizon">
+            <button class="subtab" data-h="6">6 meses</button>
+            <button class="subtab on" data-h="12">12 meses</button>
+            <button class="subtab" data-h="24">24 meses</button>
+          </div></div>
+        <div class="chips" id="lic-alerts" style="margin-bottom:12px"></div>
+        <div class="ganttwrap" id="lic-gantt"></div>
+        <div class="tblnote" id="lic-calnote"></div>
       </section>
-      <section class="card">
-        <div class="head"><div><h2><span class="dot"></span>Por región</h2>
-          <p class="hint" id="lic-geoHint">Haz clic en una región para filtrar.</p></div></div>
-        <div id="lic-region"></div>
-      </section>
+
       <section class="card">
         <div class="head"><div><h2><span class="dot"></span>Detalle de licitaciones</h2>
-          <p class="hint">Busca por nombre, comprador o código.</p></div></div>
+          <p class="hint">Busca por nombre, comprador, adjudicatario o código.</p></div></div>
         <div class="searchbar"><input type="search" id="lic-search" placeholder="Filtrar por texto…"></div>
         <div class="tblwrap"><table class="tbl" id="lic-table"></table></div>
         <div class="tblnote" id="lic-tblnote"></div>
@@ -475,22 +541,35 @@ document.querySelectorAll('nav.pages a[data-page]').forEach(a=>{
 });
 
 /* ================= Licitaciones ================= */
-const L = DATA.lic || {rows:[],reg:[],est:[],comp:[]};
-const LO=0,LA=1,LM=2,LC=3,LR=4,LE=5,LMO=6,LADJ=7,LCOD=8,LNOM=9,LF=10;
-let licOrigen=0, licYear="all", licRegion="all", licQuery="";
+const L = DATA.lic || {rows:[],reg:[],est:[],comp:[],sub:[],adj:[]};
+const LO=0,LA=1,LM=2,LC=3,LR=4,LE=5,LMO=6,LADJ=7,LCOD=8,LNOM=9,LF=10,LSUB=11,LADJI=12,LMADJ=13,LFADJ=14,LDUR=15,LRENOV=16,LVENCE=17;
+let licOrigen=0;
+let compQuery="", adjQuery="", licQuery="";
+let licHorizon=12;
+const F={year:"all", comp:-1, adj:-1, sub:"", reg:-1};
 const licYears=[...new Set(L.rows.map(r=>r[LA]))].filter(y=>y>0).sort((a,b)=>a-b);
+const HOY=new Date().toISOString().slice(0,10);
+const licUCM=(s)=>{const n=(s||"").toUpperCase();return n.includes("UNIDAD CORONARIA")||n==="UCM"||n.includes("U.C.M");};
 
 function licVal(r){ return unit==="uf" ? r[LMO]/ufYear(r[LA]) : r[LMO]; }
 function licBase(){ return L.rows.filter(r=>r[LO]===licOrigen); }
-function licScope(){ return licBase().filter(r=>(licYear==="all"||r[LA]===licYear)&&(licRegion==="all"||r[LR]===licRegion)); }
-function licScopeNoRegion(){ return licBase().filter(r=>licYear==="all"||r[LA]===licYear); }
+function licMatch(r,ex){
+  return (ex==="year"||F.year==="all"||r[LA]===F.year)
+      && (ex==="comp"||F.comp<0||r[LC]===F.comp)
+      && (ex==="adj"||F.adj<0||r[LADJI]===F.adj)
+      && (ex==="sub"||!F.sub||L.sub[r[LSUB]]===F.sub)
+      && (ex==="reg"||F.reg<0||r[LR]===F.reg);
+}
+function licScope(){ return licBase().filter(r=>licMatch(r,"")); }
+function licScopeExcept(ex){ return licBase().filter(r=>licMatch(r,ex)); }
 function estClass(name){ const n=(name||"").toLowerCase(); return n.includes("adjudicad")?"est-adj":(n.includes("desierta")?"est-des":"est-otro"); }
+function mesesEntre(a,b){ if(!a||!b)return null; return (b.slice(0,4)-a.slice(0,4))*12+(b.slice(5,7)-a.slice(5,7)); }
 
 function licKPIs(){
   const rs=licScope(), n=rs.length, monto=rs.reduce((s,r)=>s+licVal(r),0);
   const adj=rs.filter(r=>r[LADJ]===1).length;
   const des=rs.filter(r=>(L.est[r[LE]]||"").toLowerCase().includes("desierta")).length;
-  const k=[["Licitaciones",nf.format(n),licYear==="all"?"2020 en adelante":("año "+licYear)],
+  const k=[["Licitaciones",nf.format(n),F.year==="all"?"2020 en adelante":("año "+F.year)],
     ["Monto estimado",money(monto),"suma del período"],
     ["Adjudicadas",n?Math.round(adj/n*100)+"%":"—",nf.format(adj)+" procesos"],
     ["Desiertas",n?Math.round(des/n*100)+"%":"—",nf.format(des)+" procesos"]];
@@ -498,38 +577,168 @@ function licKPIs(){
 }
 function licAnnual(){
   const map={}; licYears.forEach(y=>map[y]=0);
-  licBase().filter(r=>licRegion==="all"||r[LR]===licRegion).forEach(r=>{ if(map[r[LA]]!==undefined) map[r[LA]]+=licVal(r); });
+  licScopeExcept("year").forEach(r=>{ if(map[r[LA]]!==undefined) map[r[LA]]+=licVal(r); });
   const data=licYears.map(y=>({y,v:map[y]})), max=Math.max(...data.map(d=>d.v),1);
-  const W=1000,H=240,padL=54,padR=10,padT=16,padB=34,bw=(W-padL-padR)/Math.max(data.length,1);
+  const W=1000,H=230,padL=54,padR=10,padT=16,padB=34,bw=(W-padL-padR)/Math.max(data.length,1);
   let g="";for(let i=0;i<=4;i++){const gy=padT+(H-padT-padB)*i/4;g+=`<g class="grid"><line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}"/><text class="axis" x="${padL-8}" y="${gy+4}" text-anchor="end">${short(max*(1-i/4))}</text></g>`;}
-  let bars="";data.forEach((d,i)=>{const h=(H-padT-padB)*(d.v/max),x=padL+i*bw+bw*0.16,w=bw*0.68,y=H-padB-h,sel=(d.y===licYear);
-    bars+=`<g class="bar" tabindex="0" role="button" aria-label="${d.y}: ${money(d.v)}" onclick="selLicYear(${d.y})" onkeypress="if(event.key==='Enter')selLicYear(${d.y})"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5" fill="${sel?'var(--red)':'url(#gb)'}"></rect><text class="barval" x="${x+w/2}" y="${y-6}" text-anchor="middle">${short(d.v)}</text><text class="axis" x="${x+w/2}" y="${H-padB+16}" text-anchor="middle" style="${sel?'fill:var(--red);font-weight:700':''}">${d.y}</text></g>`;});
-  document.getElementById("lic-annual").innerHTML=`<svg viewBox="0 0 ${W} ${H}"><defs><linearGradient id="gb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#498CDF"/><stop offset="1" stop-color="#244F94"/></linearGradient></defs>${g}${bars}</svg><div class="legend"><span>Monto estimado en ${unitLabel()}.</span></div>`;
+  let bars="";data.forEach((d,i)=>{const h=(H-padT-padB)*(d.v/max),x=padL+i*bw+bw*0.16,w=bw*0.68,y=H-padB-h,sel=(d.y===F.year);
+    bars+=`<g class="bar" tabindex="0" role="button" aria-label="${d.y}: ${money(d.v)}" onclick="fYear(${d.y})" onkeypress="if(event.key==='Enter')fYear(${d.y})"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5" fill="${sel?'var(--red)':'url(#gb)'}"></rect><text class="barval" x="${x+w/2}" y="${y-6}" text-anchor="middle">${short(d.v)}</text><text class="axis" x="${x+w/2}" y="${H-padB+16}" text-anchor="middle" style="${sel?'fill:var(--red);font-weight:700':''}">${d.y}</text></g>`;});
+  document.getElementById("lic-annual").innerHTML=`<svg viewBox="0 0 ${W} ${H}"><defs><linearGradient id="gb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#498CDF"/><stop offset="1" stop-color="#244F94"/></linearGradient></defs>${g}${bars}</svg>`;
+}
+function licSubtipo(){
+  const rs=licScopeExcept("sub"), agg={};
+  rs.forEach(r=>{const s=L.sub[r[LSUB]]||"general";agg[s]=(agg[s]||0)+1;});
+  const nombres={general:"General",arriendo:"Arriendo",basico:"Básico",avanzado:"Avanzado"};
+  const order=["avanzado","basico","arriendo","general"].filter(s=>agg[s]);
+  document.getElementById("lic-subtipo").innerHTML=order.map(s=>`<div class="chip click ${F.sub===s?'sel':''}" onclick="fSub('${s}')"><div class="n">${nf.format(agg[s])}</div><div class="l">${nombres[s]||s}</div></div>`).join("")||'<span class="note">Sin datos.</span>';
 }
 function licEstado(){
   const rs=licScope(), agg={};
   rs.forEach(r=>{const e=L.est[r[LE]]||"—";agg[e]=(agg[e]||0)+1;});
   const order=Object.entries(agg).sort((a,b)=>b[1]-a[1]);
-  document.getElementById("lic-estado").innerHTML = order.map(([e,n])=>`<div class="chip"><div class="n">${nf.format(n)}</div><div class="l ${estClass(e)}">${e}</div></div>`).join("") || '<span class="note">Sin datos.</span>';
+  document.getElementById("lic-estado").innerHTML=order.map(([e,n])=>`<div class="chip"><div class="n">${nf.format(n)}</div><div class="l ${estClass(e)}">${e}</div></div>`).join("")||'<span class="note">Sin datos.</span>';
 }
-function licRegionChart(){
-  const agg={}; licScopeNoRegion().forEach(r=>{agg[r[LR]]=(agg[r[LR]]||0)+licVal(r);});
-  let pairs=Object.entries(agg).map(([k,v])=>({name:L.reg[k]||"Sin región",v,key:Number(k),ucm:(licRegion!=="all"&&Number(k)===licRegion)}));
-  pairs.sort((a,b)=>b.v-a.v); pairs=pairs.slice(0,14);
-  hbars("lic-region",pairs,"selLicRegion");
+function ranking(elId, dim, dict, query, filterVal, fnName, ucm){
+  const rs=licScopeExcept(dim), agg={};
+  rs.forEach(r=>{const k=r[dim==="comp"?LC:LADJI]; if(dict[k]===undefined)return; const o=agg[k]||(agg[k]={n:0,m:0}); o.n++; o.m+=licVal(r);});
+  let arr=Object.entries(agg).map(([k,o])=>({k:Number(k),name:dict[k]||"—",n:o.n,m:o.m}));
+  if(dim==="adj") arr=arr.filter(x=>x.name.trim()!=="");
+  arr.sort((a,b)=>b.n-a.n);
+  if(query){const q=query.toLowerCase();arr=arr.filter(x=>x.name.toLowerCase().includes(q));}
+  const rows=arr.slice(0,60).map(x=>`<div class="rankrow ${filterVal===x.k?'on':''}" onclick="${fnName}(${x.k})"><span class="nm ${ucm&&licUCM(x.name)?'ucm':''}" title="${x.name}">${x.name}</span><span class="ct">${x.n}</span><span class="mn">${short(x.m)}</span></div>`).join("");
+  document.getElementById(elId).innerHTML=rows||'<span class="note">Sin resultados.</span>';
 }
+function licCal(){
+  const today=new Date();
+  const y0=today.getFullYear(), m0=today.getMonth();
+  const pad2=n=>String(n).padStart(2,"0");
+  const startIso=`${y0}-${pad2(m0+1)}-01`;
+  const endTotal=(y0*12+m0)+licHorizon, endY=Math.floor(endTotal/12), endM=endTotal%12;
+  const endIso=`${endY}-${pad2(endM+1)}-01`;
+  const mfs=iso=>{ if(!iso||iso.length<7)return null; const y=+iso.slice(0,4),m=+iso.slice(5,7)-1,d=+(iso.slice(8,10)||1); return (y-y0)*12+(m-m0)+(d-1)/30; };
+  let rs=licBase().filter(r=>(F.comp<0||r[LC]===F.comp)&&(F.adj<0||r[LADJI]===F.adj)&&(!F.sub||L.sub[r[LSUB]]===F.sub)
+      && r[LADJ]===1 && r[LVENCE] && r[LVENCE]>=startIso && r[LVENCE]<endIso);
+  rs.sort((a,b)=>a[LVENCE].localeCompare(b[LVENCE]));
+  const cnt=mo=>rs.filter(r=>mfs(r[LVENCE])<=mo).length;
+  document.getElementById("lic-alerts").innerHTML=
+    `<div class="chip"><div class="n venc-soon">${nf.format(cnt(3))}</div><div class="l">⚠ vencen ≤ 3 meses</div></div>`+
+    `<div class="chip"><div class="n venc-mid">${nf.format(cnt(6))}</div><div class="l">≤ 6 meses</div></div>`+
+    `<div class="chip"><div class="n">${nf.format(rs.length)}</div><div class="l">en ${licHorizon} meses</div></div>`;
+  const labelW=330, tlW=650, rowH=36, padT=34, W=labelW+tlW+30, H=padT+Math.max(rs.length,1)*rowH+12;
+  const x=k=>labelW+(k/licHorizon)*tlW;
+  let grid="";
+  const stepL=licHorizon<=6?1:(licHorizon<=12?2:3);
+  const MES=["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  for(let k=0;k<=licHorizon;k++){
+    grid+=`<line x1="${x(k)}" y1="${padT-4}" x2="${x(k)}" y2="${H}" stroke="${k===0?'#244F94':'#eef1f6'}" stroke-width="${k===0?2:1}"/>`;
+    if(k%stepL===0 && k<licHorizon){ const idx=(m0+k)%12, yy=y0+Math.floor((m0+k)/12);
+      grid+=`<text x="${x(k)+3}" y="${padT-10}" font-size="10" fill="var(--muted)">${MES[idx]} ${String(yy).slice(2)}</text>`; }
+  }
+  grid+=`<text x="${labelW}" y="14" font-size="10" fill="var(--blue)" font-weight="700">hoy</text>`;
+  const esc=s=>(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  let bars="";
+  rs.forEach((r,i)=>{
+    const y=padT+i*rowH, s=mfs(r[LFADJ]||""), e=mfs(r[LVENCE]);
+    const sx=(s!==null&&s>0)?x(Math.min(s,licHorizon)):labelW;
+    const ex=x(Math.max(0,Math.min(e,licHorizon)));
+    const w=Math.max(ex-sx,3);
+    const col=e<=3?'#A81018':(e<=6?'#b8860b':'#498CDF');
+    const serv=esc((r[LNOM]||"—").slice(0,46)), comp=esc((L.comp[r[LC]]||"").slice(0,30)), adj=esc((L.adj[r[LADJI]]||"—")), cod=esc(r[LCOD]||"");
+    bars+=`<g>
+      <text x="0" y="${y+14}" font-size="11" fill="var(--ink)" font-weight="600">${serv}</text>
+      <text x="0" y="${y+27}" font-size="9.5" fill="var(--muted)"><tspan fill="var(--slate)" font-family="ui-monospace,Menlo,Consolas,monospace">${cod}</tspan> · ${comp}</text>
+      <rect x="${sx}" y="${y+9}" width="${w}" height="${rowH-18}" rx="4" fill="${col}"><title>${cod} · ${serv}
+${comp} · adj: ${adj}
+${money(licVal(r))} · vence ${r[LVENCE]}</title></rect>
+      <text x="${Math.min(ex+5,W-46)}" y="${y+rowH/2+3}" font-size="10" fill="var(--slate)">${r[LVENCE].slice(0,7)}</text>
+    </g>`;
+  });
+  document.getElementById("lic-gantt").innerHTML = rs.length
+    ? `<svg viewBox="0 0 ${W} ${H}" style="min-width:${Math.max(W,900)}px;width:100%">${grid}${bars}</svg>`
+    : '<div class="note" style="padding:24px">No hay contratos que venzan en esta ventana con los filtros actuales.</div>';
+  document.getElementById("lic-calnote").textContent=
+    `Vencimiento estimado = fecha de adjudicación + duración del contrato. Barras rojas: vencen en ≤3 meses; ámbar: ≤6 meses. Solo contratos adjudicados con duración conocida.`;
+}
+let licOpen=null;
+function ocFmt(v){ return unit==="uf" ? v : v; }
+function licDetail(r){
+  const cod=r[LCOD]||"", est=L.est[r[LE]]||"—", adj=L.adj[r[LADJI]]||"";
+  const madj=r[LMADJ]||0, mest=r[LMO]||0;
+  const campo=(l,v)=>`<div class="dt"><span class="dl">${l}</span><span class="dv">${v}</span></div>`;
+  let proceso=`<div class="dgrid">`+
+    campo("Código", `<span class="cod">${cod}</span>`)+
+    campo("Estado", `<span class="${estClass(est)}">${est}</span>`)+
+    campo("Comprador", L.comp[r[LC]]||"—")+
+    campo("Región", L.reg[r[LR]]||"—")+
+    campo("Tipo de traslado", L.sub[r[LSUB]]||"general")+
+    campo("Publicación", r[LF]||"—")+
+    campo("Presupuesto estimado", money(unit==="uf"?mest/ufYear(r[LA]):mest))+
+    campo("Duración", r[LDUR]?r[LDUR]+" meses":"—")+
+    `</div>`;
+  let adjud = r[LADJ]===1
+    ? `<div class="dgrid">`+
+      campo("Adjudicatario", `<b>${adj||"—"}</b>`)+
+      campo("Monto adjudicado", madj>0?money(unit==="uf"?madj/ufYear(r[LA]):madj):"no informado")+
+      campo("Fecha adjudicación", r[LFADJ]||"—")+
+      campo("Vencimiento estimado", r[LVENCE]||"—")+
+      `</div>`
+    : `<p class="note">Este proceso no fue adjudicado (${est}).</p>`;
+  // Oferentes
+  const ofe=(L.ofe&&L.ofe[cod])||null;
+  let oferentes;
+  if(ofe && ofe.length){
+    oferentes=`<table class="tbl"><thead><tr><th>Oferente</th><th>RUT</th><th class="mon">Monto ofertado</th><th>Resultado</th></tr></thead><tbody>`+
+      ofe.map(o=>`<tr><td>${o.n||"—"}</td><td class="cod">${o.r||""}</td><td class="mon">${o.m?money(unit==="uf"?o.m/ufYear(r[LA]):o.m):"—"}</td><td class="est ${o.s?'est-adj':'est-otro'}">${o.s?"Seleccionada":"No seleccionada"}</td></tr>`).join("")+
+      `</tbody></table>`;
+  } else {
+    oferentes=`<p class="note">La captura de oferentes se completa tras la próxima recarga de licitaciones.</p>`;
+  }
+  // OC asociadas
+  const ocs=(L.oc&&L.oc[cod])||null;
+  let ordenes;
+  if(ocs && ocs.length){
+    const tot=ocs.reduce((s,o)=>s+(o.m||0),0);
+    ordenes=`<div class="dt"><span class="dl">Total en OC recibidas</span><span class="dv"><b>${money(unit==="uf"?tot/ufYear(r[LA]):tot)}</b> · ${ocs.length} órdenes · ${mest>0?Math.round(tot/mest*100)+"% del presupuesto":""}</span></div>`+
+      `<table class="tbl"><thead><tr><th>OC</th><th>Nombre</th><th>Proveedor</th><th>Fecha</th><th class="mon">Monto</th><th>Estado</th></tr></thead><tbody>`+
+      ocs.slice(0,80).map(o=>`<tr><td class="cod">${o.c||""}</td><td>${(o.n||"").slice(0,50)}</td><td>${(o.p||"").slice(0,28)}</td><td>${(o.f||"").slice(0,10)}</td><td class="mon">${money(unit==="uf"?(o.m||0)/ufYear(r[LA]):(o.m||0))}</td><td>${o.e||""}</td></tr>`).join("")+
+      `</tbody></table>`;
+  } else {
+    ordenes=`<p class="note">El cruce con OC recibidas se completa tras capturar el código de licitación en las órdenes y recargarlas.</p>`;
+  }
+  return `<tr class="detrow"><td colspan="10"><div class="detbox">`+
+    `<h3>${(r[LNOM]||"").slice(0,120)}</h3>`+
+    `<div class="dsec"><h4>Datos del proceso</h4>${proceso}</div>`+
+    `<div class="dsec"><h4>Adjudicación</h4>${adjud}</div>`+
+    `<div class="dsec"><h4>Oferentes</h4>${oferentes}</div>`+
+    `<div class="dsec"><h4>Órdenes de compra asociadas</h4>${ordenes}</div>`+
+    `</div></td></tr>`;
+}
+function licToggle(cod){ licOpen=(licOpen===cod?null:cod); licTable(); }
 function licTable(){
   let rs=licScope();
-  if(licQuery){ const q=licQuery.toLowerCase(); rs=rs.filter(r=>((r[LNOM]||"")+" "+(L.comp[r[LC]]||"")+" "+(r[LCOD]||"")).toLowerCase().includes(q)); }
+  if(licQuery){const q=licQuery.toLowerCase();rs=rs.filter(r=>((r[LNOM]||"")+" "+(L.comp[r[LC]]||"")+" "+(L.adj[r[LADJI]]||"")+" "+(r[LCOD]||"")).toLowerCase().includes(q));}
   rs=rs.slice().sort((a,b)=>(b[LF]||"").localeCompare(a[LF]||""));
   const total=rs.length, show=rs.slice(0,150);
-  const head=`<thead><tr><th>Código</th><th>Nombre</th><th>Comprador</th><th>Región</th><th>Fecha</th><th class="mon">Monto est.</th><th>Estado</th></tr></thead>`;
-  const body="<tbody>"+show.map(r=>{const est=L.est[r[LE]]||"";return `<tr><td class="cod">${r[LCOD]||""}</td><td>${(r[LNOM]||"").slice(0,90)}</td><td>${(L.comp[r[LC]]||"").slice(0,45)}</td><td>${L.reg[r[LR]]||""}</td><td>${r[LF]||""}</td><td class="mon">${money(licVal(r))}</td><td class="est ${estClass(est)}">${est}</td></tr>`;}).join("")+"</tbody>";
+  const head=`<thead><tr><th></th><th>Código</th><th>Nombre</th><th>Comprador</th><th>Adjudicatario</th><th>Región</th><th>Adjud.</th><th class="mon">Monto est.</th><th>Dur.</th><th>Vence</th><th>Estado</th></tr></thead>`;
+  const body="<tbody>"+show.map(r=>{const est=L.est[r[LE]]||"";const cod=r[LCOD]||"";const op=(licOpen===cod);
+    const tr=`<tr class="clik ${op?'open':''}" onclick="licToggle('${cod}')"><td class="exp">${op?'▾':'▸'}</td><td class="cod">${cod}</td><td>${(r[LNOM]||"").slice(0,60)}</td><td>${(L.comp[r[LC]]||"").slice(0,32)}</td><td>${(L.adj[r[LADJI]]||"—").slice(0,28)}</td><td>${L.reg[r[LR]]||""}</td><td>${r[LFADJ]||"—"}</td><td class="mon">${money(licVal(r))}</td><td>${r[LDUR]?r[LDUR]+" m":"—"}</td><td>${r[LVENCE]||"—"}</td><td class="est ${estClass(est)}">${est}</td></tr>`;
+    return op ? tr+licDetail(r) : tr;}).join("")+"</tbody>";
   document.getElementById("lic-table").innerHTML=head+body;
-  document.getElementById("lic-tblnote").textContent = total?`Mostrando ${show.length} de ${nf.format(total)} licitaciones${licQuery?" que coinciden con la búsqueda":""}.`:"No hay licitaciones para este filtro.";
+  document.getElementById("lic-tblnote").textContent=total?`Mostrando ${show.length} de ${nf.format(total)} licitaciones${licQuery?" que coinciden":""}. Haz clic en una fila para ver el detalle.`:"No hay licitaciones para este filtro.";
 }
-function selLicYear(y){ licYear=(licYear===y?"all":y); licPaint(); }
-function selLicRegion(k){ licRegion=(licRegion===k?"all":k); licPaint(); }
+function licChips(){
+  const c=[];
+  if(F.year!=="all") c.push(`<span class="fchip">Año <b>${F.year}</b><span class="x" onclick="fYear(${F.year})">✕</span></span>`);
+  if(F.comp>=0) c.push(`<span class="fchip">Comprador <b>${(L.comp[F.comp]||"").slice(0,28)}</b><span class="x" onclick="fComp(${F.comp})">✕</span></span>`);
+  if(F.adj>=0) c.push(`<span class="fchip">Adjudicatario <b>${(L.adj[F.adj]||"").slice(0,26)}</b><span class="x" onclick="fAdj(${F.adj})">✕</span></span>`);
+  if(F.sub) c.push(`<span class="fchip">Tipo <b>${F.sub}</b><span class="x" onclick="fSub('${F.sub}')">✕</span></span>`);
+  document.getElementById("lic-chips").innerHTML=c.join("");
+  document.getElementById("lic-clearf").style.display=c.length?"":"none";
+}
+function fYear(y){ F.year=(F.year===y?"all":y); licPaint(); }
+function fComp(i){ F.comp=(F.comp===i?-1:i); licPaint(); }
+function fAdj(i){ F.adj=(F.adj===i?-1:i); licPaint(); }
+function fSub(s){ F.sub=(F.sub===s?"":s); licPaint(); }
 function licPaint(){
   const hasData=licBase().length>0;
   document.getElementById("lic-empty").hidden=hasData;
@@ -540,11 +749,12 @@ function licPaint(){
       : 'Aún no hay licitaciones del mercado cargadas.';
     return;
   }
-  document.getElementById("lic-yearPill").textContent = licYear==="all"?"Todos los años":("Año "+licYear);
-  document.getElementById("lic-clearf").style.display = ((licYear!=="all")||(licRegion!=="all"))?"":"none";
-  let ctx=licYear==="all"?"2020 en adelante":("Año "+licYear); if(licRegion!=="all") ctx+=" · "+(L.reg[licRegion]||"");
-  document.getElementById("lic-note").textContent=ctx+" · montos en "+unitLabel()+".";
-  licKPIs(); licAnnual(); licEstado(); licRegionChart(); licTable();
+  document.getElementById("lic-yearPill").textContent=F.year==="all"?"Todos los años":("Año "+F.year);
+  document.getElementById("lic-note").textContent="Montos en "+unitLabel()+".";
+  licChips(); licKPIs(); licAnnual(); licSubtipo(); licEstado();
+  ranking("lic-comp","comp",L.comp,compQuery,F.comp,"fComp",false);
+  ranking("lic-adj","adj",L.adj,adjQuery,F.adj,"fAdj",true);
+  licCal(); licTable();
 }
 (function(){
   const nm=L.rows.filter(r=>r[LO]===0).length, np=L.rows.filter(r=>r[LO]===1).length;
@@ -553,13 +763,21 @@ function licPaint(){
   if(tp) tp.textContent=`De mis proveedores (${nf.format(np)})`;
 })();
 document.querySelectorAll(".subtab").forEach(b=>b.addEventListener("click",()=>{
-  licOrigen=Number(b.dataset.o); licYear="all"; licRegion="all"; licQuery="";
-  const s=document.getElementById("lic-search"); if(s) s.value="";
+  licOrigen=Number(b.dataset.o); F.year="all"; F.comp=-1; F.adj=-1; F.sub=""; F.reg=-1;
+  compQuery=adjQuery=licQuery="";
+  ["lic-compSearch","lic-adjSearch","lic-search"].forEach(id=>{const e=document.getElementById(id);if(e)e.value="";});
   document.querySelectorAll(".subtab").forEach(x=>x.classList.toggle("on",x===b));
   licPaint();
 }));
-document.getElementById("lic-search").addEventListener("input",e=>{ licQuery=e.target.value.trim(); licTable(); });
-document.getElementById("lic-clearf").addEventListener("click",()=>{ licYear="all"; licRegion="all"; licPaint(); });
+document.getElementById("lic-compSearch").addEventListener("input",e=>{compQuery=e.target.value.trim();ranking("lic-comp","comp",L.comp,compQuery,F.comp,"fComp",false);});
+document.getElementById("lic-adjSearch").addEventListener("input",e=>{adjQuery=e.target.value.trim();ranking("lic-adj","adj",L.adj,adjQuery,F.adj,"fAdj",true);});
+document.getElementById("lic-search").addEventListener("input",e=>{licQuery=e.target.value.trim();licTable();});
+document.querySelectorAll("#lic-horizon .subtab").forEach(b=>b.addEventListener("click",()=>{
+  licHorizon=Number(b.dataset.h);
+  document.querySelectorAll("#lic-horizon .subtab").forEach(x=>x.classList.toggle("on",x===b));
+  licCal();
+}));
+document.getElementById("lic-clearf").addEventListener("click",()=>{F.year="all";F.comp=-1;F.adj=-1;F.sub="";F.reg=-1;licPaint();});
 </script>
 </body>
 </html>

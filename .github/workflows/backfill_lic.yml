@@ -20,6 +20,11 @@ on:
         type: boolean
         required: false
         default: true
+      reset:
+        description: "Borra las licitaciones de mercado ya cargadas antes de recargar (recomendado al hacer un backfill completo)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write        # para guardar la base actualizada cuando NO es dry-run
@@ -49,12 +54,14 @@ jobs:
         run: |
           DRY=""
           if [ "${{ inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
+          RESET=""
+          if [ "${{ inputs.reset }}" = "true" ]; then RESET="--reset"; fi
           if [ -n "${{ inputs.desde }}" ] && [ -n "${{ inputs.hasta }}" ]; then
-            python pipeline.py import-lic-da --desde "${{ inputs.desde }}" --hasta "${{ inputs.hasta }}" $DRY
+            python pipeline.py import-lic-da --desde "${{ inputs.desde }}" --hasta "${{ inputs.hasta }}" $RESET $DRY
           elif [ -n "${{ inputs.url }}" ]; then
-            python pipeline.py import-lic-da --url "${{ inputs.url }}" $DRY
+            python pipeline.py import-lic-da --url "${{ inputs.url }}" $RESET $DRY
           else
-            python pipeline.py import-lic-da --dir lic_abiertos $DRY
+            python pipeline.py import-lic-da --dir lic_abiertos $RESET $DRY
           fi
 
       - name: Reconstruir el panel

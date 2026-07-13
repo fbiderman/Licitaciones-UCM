@@ -1017,7 +1017,8 @@ _VEHICULO_ONU = {"25101703"}          # "Ambulancias" (vehículo)
 _MED = ["paciente", "enfermo", "dializ", "hemodial", "prehospital", "ambulatorio",
         "herido", "lesionado", "neonatal", "urgencia medic", "soporte vital"]
 # la ambulancia aparece pero el objeto NO es el servicio de traslado
-_VEH_WORDS = ["compra", "adquisicion", "mantencion", "mantenimiento", "reparacion", "renovacion", "repotenc"]
+_VEH_WORDS = ["compra", "adquisicion", "mantencion", "mantenimiento", "reparacion", "renovacion",
+              "repotenc", "reposicion", "minibus adaptado", "suministro de furgon"]
 _OTRO_WORDS = ["seguro", "poliza", "aseo", "limpieza", "repuesto", "suministro", "insumo",
                "camilla", "pintura", "gps", "desabolla", "neumatico", "uniforme", "vestuario",
                "personal de ambulancia", "capacita", "curso", "software", "combustible", "lavado"]
@@ -1042,6 +1043,10 @@ def _clasificar_traslado(row, obj_cols, line_cols):
             return "incidental"
         return "servicio"
     if ("traslado" in name or "transporte" in name) and any(m in name for m in _MED):
+        if any(v in name for v in _VEH_WORDS):
+            return "vehiculo"
+        if any(o in name for o in _OTRO_WORDS):
+            return "incidental"
         return "servicio"
     if (_VEHICULO_ONU & codes) and any(v in name for v in _VEH_WORDS):
         return "vehiculo"

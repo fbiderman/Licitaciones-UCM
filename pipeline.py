@@ -793,10 +793,16 @@ def cmd_import_da(args):
     origenes = []
     for u in (args.url or []):
         u = str(u).strip()
+        u = re.sub(r"^-*url\s+", "", u, flags=re.I)      # tolera un "url " pegado por error
         if u.lower().startswith(("http://", "https://")):
-            u = u.split()[0]      # descarta texto pegado tras la URL (p.ej. "Descargar archivo")
-        elif re.fullmatch(r"\d{4}-\d{1,2}", u):
-            u = f"{_OC_BASE}{u}.zip"
+            u = u.split()[0]      # descarta texto pegado tras la URL
+        else:
+            mm = re.search(r"\b(\d{4}-\d{1,2})\b", u)     # detecta AÑO-MES aunque venga con texto
+            if mm:
+                u = f"{_OC_BASE}{mm.group(1)}.zip"
+            elif not os.path.exists(u):
+                print(f"  ! Fuente no reconocida: '{u}'. Usa una URL, un AÑO-MES (ej: 2026-6) o una ruta válida. Se omite.")
+                u = ""
         if u:
             origenes.append(u)
     if getattr(args, "desde", None) and getattr(args, "hasta", None):

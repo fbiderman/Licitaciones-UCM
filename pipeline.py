@@ -789,19 +789,34 @@ def cmd_import_da(args):
         print("No hay RUT en providers.csv."); return
     print(f"Filtrando por {len(ruts)} RUT de proveedores.", flush=True)
 
+    _OC_BASE = "https://transparenciachc.blob.core.windows.net/oc-da/"
     origenes = []
     for u in (args.url or []):
         u = str(u).strip()
         if u.lower().startswith(("http://", "https://")):
             u = u.split()[0]      # descarta texto pegado tras la URL (p.ej. "Descargar archivo")
+        elif re.fullmatch(r"\d{4}-\d{1,2}", u):
+            u = f"{_OC_BASE}{u}.zip"
         if u:
             origenes.append(u)
+    if getattr(args, "desde", None) and getattr(args, "hasta", None):
+        try:
+            y0, m0 = (int(x) for x in args.desde.split("-"))
+            y1, m1 = (int(x) for x in args.hasta.split("-"))
+            y, m = y0, m0
+            while (y, m) <= (y1, m1):
+                origenes.append(f"{_OC_BASE}{y}-{m}.zip")
+                m += 1
+                if m > 12:
+                    m = 1; y += 1
+        except ValueError:
+            print("  ! --desde/--hasta deben ser AÑO-MES, ej: 2023-1"); return
     if args.dir and os.path.isdir(args.dir):
         for f in sorted(os.listdir(args.dir)):
             if f.lower().endswith((".csv", ".gz", ".zip", ".7z")):
                 origenes.append(os.path.join(args.dir, f))
     if not origenes:
-        print("Sin fuentes. Usa --url <URL> (repetible) o --dir <carpeta>.")
+        print("Sin fuentes. Usa --url <URL o AÑO-MES>, --desde/--hasta, o --dir <carpeta>.")
         return
 
     total_ins = 0
@@ -1321,7 +1336,9 @@ def main():
     rda.add_argument("--dir", default="datos_abiertos", help="Carpeta con archivos (por defecto: datos_abiertos).")
     rda.set_defaults(func=cmd_resolve_da)
     da = sub.add_parser("import-da", help="Importa OC desde CSV de Datos Abiertos (URL o carpeta), filtrando por tus RUT.")
-    da.add_argument("--url", action="append", help="URL de un CSV/zip/7z de Datos Abiertos (repetible).")
+    da.add_argument("--url", action="append", help="URL o AÑO-MES de un CSV/zip de Datos Abiertos (repetible).")
+    da.add_argument("--desde", help="Rango: mes inicial AÑO-MES (ej: 2023-1).")
+    da.add_argument("--hasta", help="Rango: mes final AÑO-MES (ej: 2026-6).")
     da.add_argument("--dir", default="datos_abiertos", help="Carpeta con archivos a importar (por defecto: datos_abiertos).")
     da.add_argument("--dry-run", action="store_true", help="Solo muestra el mapeo de columnas y cuenta, sin guardar.")
     da.add_argument("--limit", type=int, default=0, help="Procesa solo las primeras N filas (para pruebas).")

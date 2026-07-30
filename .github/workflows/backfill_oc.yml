@@ -20,6 +20,16 @@ on:
         type: boolean
         required: false
         default: true
+      mercado_completo:
+        description: "Traer TODO el mercado de traslado (todos los proveedores), no solo los tuyos"
+        type: boolean
+        required: false
+        default: true
+      reset:
+        description: "Borrar todas las OC antes de cargar (recomendado en la 1ª corrida del mercado completo)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -49,10 +59,14 @@ jobs:
         run: |
           DRY=""
           if [ "${{ inputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
+          MERCADO=""
+          if [ "${{ inputs.mercado_completo }}" = "true" ]; then MERCADO="--mercado"; fi
+          RESET=""
+          if [ "${{ inputs.reset }}" = "true" ]; then RESET="--reset"; fi
           if [ -n "${{ inputs.desde }}" ] && [ -n "${{ inputs.hasta }}" ]; then
-            python pipeline.py import-da --desde "${{ inputs.desde }}" --hasta "${{ inputs.hasta }}" $DRY
+            python pipeline.py import-da --desde "${{ inputs.desde }}" --hasta "${{ inputs.hasta }}" $MERCADO $RESET $DRY
           elif [ -n "${{ inputs.url }}" ]; then
-            python pipeline.py import-da --url "${{ inputs.url }}" $DRY
+            python pipeline.py import-da --url "${{ inputs.url }}" $MERCADO $RESET $DRY
           else
             echo "Debes indicar 'url' (un mes) o 'desde'+'hasta' (rango)."; exit 1
           fi

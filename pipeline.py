@@ -383,20 +383,56 @@ def cmd_licitaciones(args):
 
 
 # ------------------------------------------------------------------ BUILD
+_CATS = [
+    ("generico", "Traslado de pacientes (general)",
+     ["traslado de pacient", "transporte de pacient", "traslado de usuario", "traslado de enfermo",
+      "traslado pacient", "ambulancia", "traslado", "transporte"]),
+    ("dialisis", "Diálisis / hemodiálisis", ["dializ", "hemodial"]),
+    ("arriendo", "Arriendo de ambulancias", ["arriendo", "arrendamiento", "alquiler"]),
+    ("urgencia", "Urgencia / emergencia / SAMU", ["urgencia", "emergencia", "samu", "prehospital", "rescate"]),
+    ("aislado", "Zonas aisladas / rural / insular", ["aislad", "rural", "insular", "isla "]),
+    ("programa", "Programas / postrados / domiciliario",
+     ["postrad", "domicili", "dependiente", "cronico", "atencion primaria", "cesfam"]),
+    ("aereo", "Aéreo / marítimo", ["aereo", "maritim", "lancha", "avion", "helicop"]),
+    ("onco", "Oncología", ["oncolog", "quimio"]),
+    ("neonatal", "Neonatal / pediátrico", ["neonat", "pediatr", "recien nacido", "infantil"]),
+]
+_CAT_OTROS_BIT = len(_CATS)   # bit para "Otros"
+
+
+def _catmask(nombre):
+    n = _txtnorm(nombre)
+    mask = 0
+    for i, (_cid, _lab, kws) in enumerate(_CATS):
+        if any(k in n for k in kws):
+            mask |= (1 << i)
+    if mask == 0:
+        mask |= (1 << _CAT_OTROS_BIT)
+    return mask
+
+
 def cmd_build(args):
     c = conn()
+    lic_mask = {cod: _catmask(nom) for cod, nom in
+                c.execute("SELECT codigo,nombre FROM licitacion")}
     rows = c.execute("""SELECT anio,mes,proveedor,comprador,region,estado,tipo_orden,
-                        monto_bruto*COALESCE(conversion_rate,1) FROM oc""").fetchall()
+                        monto_bruto*COALESCE(conversion_rate,1),nombre,codigo_licitacion FROM oc""").fetchall()
     prov, comp, reg, est, tip = {}, {}, {}, {}, {}
     def idx(d, v):
         v = v or ""
         return d.setdefault(v, len(d))
     out = []
     total = 0
-    for a, m, p, cp, rg, es, tp, monto in rows:
+    for a, m, p, cp, rg, es, tp, monto, nom, codlic in rows:
         monto = float(monto or 0); total += monto
+        mask = _catmask(nom)                                   # por el nombre de la OC
+        if codlic and lic_mask.get(codlic):
+            mask |= lic_mask[codlic]                            # + categoría de su licitación
+        real = mask & ~(1 << _CAT_OTROS_BIT)
+        if real:
+            mask = real                                        # si hay categoría real, no es "Otros"
         out.append([int(a), int(m), idx(prov, p), idx(comp, cp), idx(reg, rg),
-                    idx(est, es), idx(tip, tp), round(monto)])
+                    idx(est, es), idx(tip, tp), round(monto), mask])
     inv = lambda d: [k for k, _ in sorted(d.items(), key=lambda kv: kv[1])]
     snap = (c.execute("SELECT valor FROM meta WHERE clave='snapshot'").fetchone() or
             [dt.date.today().isoformat()])[0]
@@ -499,7 +535,8 @@ def cmd_build(args):
             idx(le, es or ""), round(float(monto or 0)), int(adjd or 0),
             cod or "", nom or "", (fch or "")[:10],
             idx(lsub, sub or "general"), idx(ladj, adjn or ""), round(float(madj or 0)),
-            (fadj or "")[:10], meses, (1 if renov == 1 else (0 if renov == 0 else -1)), vence])
+            (fadj or "")[:10], meses, (1 if renov == 1 else (0 if renov == 0 else -1)), vence,
+            _catmask(nom)])
         if cod:
             lic_codes.add(cod)
             if ofe_json:
@@ -530,7 +567,9 @@ def cmd_build(args):
     data = {"meta": {"source": "Mercado Publico - Traslados", "snapshot": snap,
                      "updated": updated, "data_through": data_through,
                      "rows": len(out), "total_clp": int(total), "fx": fx, "uf_ref": uf_ref,
-                     "uf_by_year": uf_by_year},
+                     "uf_by_year": uf_by_year,
+                     "cats": [{"id": cid, "label": lab} for cid, lab, _ in _CATS]
+                             + [{"id": "otros", "label": "Otros / sin categoría"}]},
             "prov": inv(prov), "comp": inv(comp), "reg": inv(reg),
             "est": inv(est), "tip": inv(tip), "rows": out,
             "roster": roster, "candidates": cand, "lic": lic}

@@ -93,6 +93,13 @@
   .catcard.off{opacity:.6}
   .catcard.off .sw{background:#c3c7cc}
   .catcard:hover{border-color:var(--bright)}
+  #cat-chart{display:flex;flex-direction:column;gap:9px}
+  .catbar{display:grid;grid-template-columns:210px 1fr 150px;align-items:center;gap:12px}
+  .catbar .cbl{font:600 13px var(--body);color:var(--ink);text-align:right}
+  .catbar .cbt{background:#eef3f9;border-radius:6px;height:20px;overflow:hidden}
+  .catbar .cbf{height:100%;border-radius:6px}
+  .catbar .cbv{font:600 12px var(--body);color:var(--slate);font-variant-numeric:tabular-nums}
+  @media(max-width:640px){.catbar{grid-template-columns:120px 1fr;gap:8px}.catbar .cbv{grid-column:2;text-align:right}}
   .legend span{display:inline-flex;align-items:center;gap:6px}
   .legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
 
@@ -200,6 +207,11 @@
       <div class="eyebrow">Configuración · categorías del mercado</div>
       <h1>¿Qué quieres analizar?</h1>
       <p>Elige las categorías de servicio que se incluirán en todo el panel. Lo que apagues aquí se descuenta de Mercado Total, Licitaciones y sus gráficos. Una misma licitación u orden puede pertenecer a más de una categoría.</p>
+    </section>
+    <section class="card">
+      <div class="head"><div><h2><span class="dot"></span>Tamaño de cada categoría</h2>
+        <p class="hint">Peso relativo en el mercado (por monto de las OC). Cada OC cuenta en una sola categoría.</p></div></div>
+      <div id="cat-chart"></div>
     </section>
     <section class="card">
       <div class="head"><div><h2><span class="dot"></span>Categorías incluidas</h2>
@@ -596,6 +608,7 @@ document.getElementById("unitToggle").addEventListener("click",e=>{
   [...e.currentTarget.children].forEach(x=>x.classList.toggle("on",x===b));
   paint();
   if(typeof licPaint==="function") licPaint();
+  if(typeof renderCatChart==="function") renderCatChart();
 });
 document.getElementById("cancelChk").addEventListener("change",e=>{
   includeCancel=e.target.checked; buildBase(); paint();
@@ -615,6 +628,22 @@ function renderCatGrid(){
        <span class="cl">${c.label}</span>
        <span class="st">${catOn[i]?'incluida':'excluida'}</span>
      </button>`).join("");
+  renderCatChart();
+}
+function renderCatChart(){
+  const el=document.getElementById("cat-chart"); if(!el) return;
+  const agg=CATS.map(()=>0);
+  DATA.rows.forEach(r=>{ for(let i=0;i<CATS.length;i++){ if(r[CB]&(1<<i)){ agg[i]+=valOf(r); break; } } });
+  const total=agg.reduce((a,b)=>a+b,0)||1;
+  const colorFor=i=>["#498CDF","#22A06B","#8FB8E8","#E8A33D","#5E6C82","#9B7FD0","#244F94","#D06BA3","#C3C7CC"][i]||"#498CDF";
+  const order=CATS.map((c,i)=>({label:c.label,v:agg[i],i})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+  const max=Math.max(...order.map(o=>o.v),1);
+  el.innerHTML=order.map(o=>{
+    const pct=o.v/total*100, w=Math.max(o.v/max*100,1.5);
+    return `<div class="catbar"><div class="cbl">${o.label}</div>`+
+      `<div class="cbt"><div class="cbf" style="width:${w}%;background:${colorFor(o.i)}"></div></div>`+
+      `<div class="cbv">${money(o.v)} · ${pct.toFixed(1)}%</div></div>`;
+  }).join("");
 }
 function applyCats(){ buildBase(); paint(); if(typeof licPaint==="function") licPaint(); renderCatGrid(); }
 function toggleCat(i){ catOn[i]=!catOn[i]; if(!catOn.some(x=>x)) catOn[i]=true; applyCats(); }

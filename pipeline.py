@@ -387,33 +387,65 @@ _CATS = [
     ("generico", "Traslado de pacientes (general)",
      ["traslado de pacient", "transporte de pacient", "traslado de usuario", "traslado de enfermo",
       "traslado pacient", "ambulancia", "minibus", "traslado", "transporte", "movilizacion"]),
-    ("dialisis", "Diálisis / hemodiálisis", ["dializ", "hemodial"]),
+    ("dialisis", "Diálisis / hemodiálisis", ["dialisis", "dializ", "hemodial", "nefrolog"]),
     ("arriendo", "Arriendo de ambulancias", ["arriendo", "arrendamiento", "alquiler"]),
-    ("urgencia", "Urgencia / emergencia / SAMU", ["urgencia", "emergencia", "samu", "prehospital", "rescate"]),
+    ("urgencia", "Urgencia / emergencia / SAMU", ["urgencia", "samu", "prehospital", "rescate"]),
     ("aislado", "Zonas aisladas / rural / insular",
      ["aislad", "rural", "insular", "isla ", "transbordador", "barcaza", "balsa", "palena"]),
     ("programa", "Programas / postrados / domiciliario",
-     ["postrad", "domicili", "dependiente", "cronico", "atencion primaria", "cesfam"]),
+     ["postrad", "domicili", "dependiente", "cronico", "hospitalizacion domiciliaria"]),
     ("aereo", "Aéreo / marítimo",
      ["aereo", "aeroevac", "aeromedic", "evacuacion aer", "maritim", "lancha", "avion", "helicop"]),
-    ("onco", "Oncología", ["oncolog", "quimio"]),
-    ("neonatal", "Neonatal / pediátrico", ["neonat", "pediatr", "recien nacido", "infantil"]),
+    ("adquisicion", "Adquisición de ambulancias", []),   # detección compuesta (ver _es_adquisicion_amb)
+    ("mantencion", "Mantención de ambulancias", []),      # detección compuesta (ver _es_mantencion_amb)
 ]
 _CAT_OTROS_BIT = len(_CATS)   # bit para "Otros"
+_CAT_IDX = {cid: i for i, (cid, _lab, _kw) in enumerate(_CATS)}
+# prioridad para asignar UNA sola categoría cuando calza en varias
+_CAT_PRIO = ["mantencion", "adquisicion", "aereo", "dialisis", "arriendo", "urgencia", "aislado", "programa"]
+
+# --- detección compuesta de adquisición / mantención de ambulancias ---
+_ADQ_WORDS = ["adquisicion", "adquuisicion", "reposicion", "compra de ambulancia", "compra ambulancia",
+              "renovacion de ambulancia", "renovacion ambulancia"]
+_MANT_WORDS = ["mantencion", "mantenimiento", "reparacion"]
+_VEHIC_WORDS = ["ambulancia", "movil ", "movil-", "minibus", "furgon", "vehiculo", "camioneta"]
+
+
+def _es_adquisicion_amb(n):
+    return any(a in n for a in _ADQ_WORDS) and any(v in n for v in _VEHIC_WORDS)
+
+
+def _es_mantencion_amb(n):
+    return any(mm in n for mm in _MANT_WORDS) and any(v in n for v in _VEHIC_WORDS)
 # nombres que NO son traslado (ruido que se cuela por el filtro amplio de OC)
 _NO_TRASLADO = ["examen", "cintigra", "linfocintig", "insumo", "oxigeno", "medicamento", "reactivo",
-                "accesorio", "bougie", "bajada infusion", "equipos medicos", "equipo medico"]
+                "accesorio", "bougie", "bajada infusion", "equipos medicos", "equipo medico",
+                "internet", "satelital"]
 # verbos que confirman que la OC es de transporte de pacientes
 _TRANSP_VERB = ["traslado", "transporte", "ambulancia", "movilizacion", "aeroevac", "evacuacion aer",
                 "aereo", "transbordador", "barcaza", "lancha", "rescate", "aeromedic"]
 
 
+# ruido "duro": nunca es transporte, aunque el nombre diga "ambulancia"
+_HARD_NO = ["internet", "satelital", "desfibrilador", "monitor", "camilla", "equipamiento",
+            "equipos para ambulancia", "equipos-", "componente", "repuesto", "examen", "cintigra",
+            "linfocintig", "reactivo", "bougie", "medicamento", "insumo", "accesorio",
+            "lamina de seguridad", "cubierta estacionamiento"]
+# ruido "blando": solo si NO hay verbo de transporte
+_NO_TRASLADO = ["oxigeno", "equipos medicos", "equipo medico", "bajada infusion", "agua destilada"]
+
+
 def _oc_no_es_transporte(nombre):
-    """True si la OC NO es transporte de pacientes (tratamiento de diálisis, insumos, exámenes...)."""
+    """True si la OC NO es del mercado de traslado/ambulancias que nos interesa."""
     n = _txtnorm(nombre)
-    # prestación de salud / contrato de diálisis: es tratamiento, no traslado (aunque lo mencione)
+    if any(h in n for h in _HARD_NO):
+        return True                                     # equipamiento/componentes/insumos/internet
     if "contrato dialisis" in n or ("prestacion" in n and ("salud" in n or "hemodial" in n or "dialisis" in n or "renal" in n)):
-        return True
+        return True                                     # tratamiento de diálisis (no traslado)
+    if ("funcionario" in n) and not any(p in n for p in ("paciente", "usuario", "enfermo", "herido", "dializ")):
+        return True                                     # traslado solo de funcionarios
+    if _es_adquisicion_amb(n) or _es_mantencion_amb(n):
+        return False                                    # compra/mantención de ambulancia: sí nos interesa
     if any(v in n for v in _TRANSP_VERB):
         return False
     if any(t in n for t in _NO_TRASLADO):
@@ -431,19 +463,43 @@ def _dur_meses(dur, unidad):
     return int(round(dur * factor))
 
 
+_SPEC_BITS = sum(1 << i for i in range(1, len(_CATS)))   # bits 1..8 (categorías específicas)
+_PROV_AEREO = ["aeromedic", "aviacion", "aerocardal", "helicop", "aereo", "aerea", "aero ", "aeronaut"]
+
+
+def _prov_mask(proveedor):
+    """Señal de categoría por el rubro del proveedor (hoy: aéreo/marítimo)."""
+    p = _txtnorm(proveedor)
+    if any(k in p for k in _PROV_AEREO):
+        return (1 << 6)     # bit 6 = Aéreo / marítimo
+    return 0
+
+
 def _catmask(nombre):
     n = _txtnorm(nombre)
-    mask = 0
-    for i, (_cid, _lab, kws) in enumerate(_CATS):
-        if any(k in n for k in kws):
-            mask |= (1 << i)
-    if mask == 0:
-        # sin subtipo: si parece insumo/examen es "Otros"; si no, es traslado general
-        if any(k in n for k in _NO_TRASLADO):
-            mask |= (1 << _CAT_OTROS_BIT)
-        else:
-            mask |= 1   # bit 0 = Traslado de pacientes (general)
-    return mask
+    spec = 0
+    for i in range(1, _CAT_IDX["aereo"] + 1):      # categorías por palabra (diálisis..aéreo)
+        if any(k in n for k in _CATS[i][2]):
+            spec |= (1 << i)
+    if _es_adquisicion_amb(n):
+        spec |= (1 << _CAT_IDX["adquisicion"])
+    if _es_mantencion_amb(n):
+        spec |= (1 << _CAT_IDX["mantencion"])
+    if spec:
+        return spec
+    return 1                                        # transporte sin subtipo -> general
+
+
+def _cat_single(mask):
+    """Devuelve la máscara con UNA sola categoría: la específica de mayor prioridad;
+    si no hay específica, 'general'; si no es transporte, 'otros'."""
+    for cid in _CAT_PRIO:
+        b = 1 << _CAT_IDX[cid]
+        if mask & b:
+            return b
+    if mask & 1:
+        return 1
+    return (1 << _CAT_OTROS_BIT)
 
 
 def cmd_build(args):
@@ -496,12 +552,10 @@ def cmd_build(args):
         monto = float(monto or 0)
         if _oc_no_es_transporte(nom):                    # excluye tratamiento/insumos/exámenes
             continue
-        mask = _catmask(nom)
+        mask = _catmask(nom) | _prov_mask(p)
         if codlic and lic_mask.get(codlic):
             mask |= lic_mask[codlic]
-        real = mask & ~(1 << _CAT_OTROS_BIT)
-        if real:
-            mask = real
+        mask = _cat_single(mask)
         pi, ci, ri, ei, ti = idx(prov, p), idx(comp, cp), idx(reg, rg), idx(est, es), idx(tip, tp)
         for yy, mm, amt in _prorratea(int(a or 0), int(m or 0), monto, codlic):
             total += amt
@@ -601,7 +655,7 @@ def cmd_build(args):
             cod or "", nom or "", (fch or "")[:10],
             idx(lsub, sub or "general"), idx(ladj, adjn or ""), round(float(madj or 0)),
             (fadj or "")[:10], meses, (1 if renov == 1 else (0 if renov == 0 else -1)), vence,
-            _catmask(nom)])
+            _cat_single(_catmask(nom) | _prov_mask(adjn))])
         if cod:
             lic_codes.add(cod)
             if ofe_json:
@@ -971,12 +1025,16 @@ def cmd_import_da(args):
             def _oc_es_traslado(row):
                 nom = " ".join(str(row.get(cc, "") or "") for cc in obj_cols_oc)
                 if _oc_no_es_transporte(nom):
-                    return False                       # tratamiento/insumo, no traslado
+                    return False                       # equipamiento/tratamiento/insumo/internet
+                n = _txtnorm(nom)
+                if _es_adquisicion_amb(n) or _es_mantencion_amb(n):
+                    return True                        # compra o mantención de ambulancia
                 cl = _clasificar_traslado(row, obj_cols_oc, onu_cols_oc)
-                if cl == "servicio":
+                if cl in ("servicio", "vehiculo"):     # incluye vehículo (adquisición de ambulancia)
                     return True
                 for oc in onu_cols_oc:
-                    if str(row.get(oc, "") or "").strip() == "92101902":
+                    v = str(row.get(oc, "") or "").strip()
+                    if v in ("92101902", "25101703"):  # servicios de ambulancia / ambulancia (vehículo)
                         return True
                 return False
 
@@ -1154,7 +1212,7 @@ _LIC_RUBRO_COLS = ["CodigoProductoONU", "codigoProductoONU", "Nombre producto ge
 _SERVICIO_ONU = {"92101902"}          # "Servicios de ambulancia"
 _VEHICULO_ONU = {"25101703"}          # "Ambulancias" (vehículo)
 # términos que confirman traslado DE PACIENTES (no de personal/carga/muestras)
-_MED = ["paciente", "enfermo", "dializ", "hemodial", "prehospital", "ambulatorio",
+_MED = ["paciente", "enfermo", "dialisis", "dializ", "hemodial", "prehospital", "ambulatorio",
         "herido", "lesionado", "neonatal", "urgencia medic", "soporte vital"]
 # la ambulancia aparece pero el objeto NO es el servicio de traslado
 _VEH_WORDS = ["compra", "adquisicion", "mantencion", "mantenimiento", "reparacion", "renovacion",

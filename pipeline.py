@@ -386,18 +386,23 @@ def cmd_licitaciones(args):
 _CATS = [
     ("generico", "Traslado de pacientes (general)",
      ["traslado de pacient", "transporte de pacient", "traslado de usuario", "traslado de enfermo",
-      "traslado pacient", "ambulancia", "traslado", "transporte"]),
+      "traslado pacient", "ambulancia", "minibus", "traslado", "transporte", "movilizacion"]),
     ("dialisis", "Diálisis / hemodiálisis", ["dializ", "hemodial"]),
     ("arriendo", "Arriendo de ambulancias", ["arriendo", "arrendamiento", "alquiler"]),
     ("urgencia", "Urgencia / emergencia / SAMU", ["urgencia", "emergencia", "samu", "prehospital", "rescate"]),
-    ("aislado", "Zonas aisladas / rural / insular", ["aislad", "rural", "insular", "isla "]),
+    ("aislado", "Zonas aisladas / rural / insular",
+     ["aislad", "rural", "insular", "isla ", "transbordador", "barcaza", "balsa", "palena"]),
     ("programa", "Programas / postrados / domiciliario",
      ["postrad", "domicili", "dependiente", "cronico", "atencion primaria", "cesfam"]),
-    ("aereo", "Aéreo / marítimo", ["aereo", "maritim", "lancha", "avion", "helicop"]),
+    ("aereo", "Aéreo / marítimo",
+     ["aereo", "aeroevac", "aeromedic", "evacuacion aer", "maritim", "lancha", "avion", "helicop"]),
     ("onco", "Oncología", ["oncolog", "quimio"]),
     ("neonatal", "Neonatal / pediátrico", ["neonat", "pediatr", "recien nacido", "infantil"]),
 ]
 _CAT_OTROS_BIT = len(_CATS)   # bit para "Otros"
+# nombres que NO son traslado (ruido que se cuela por el filtro amplio de OC)
+_NO_TRASLADO = ["examen", "cintigra", "linfocintig", "insumo", "oxigeno", "medicamento", "reactivo",
+                "accesorio", "bougie", "bajada infusion", "equipos medicos", "equipo medico"]
 
 
 def _catmask(nombre):
@@ -407,7 +412,11 @@ def _catmask(nombre):
         if any(k in n for k in kws):
             mask |= (1 << i)
     if mask == 0:
-        mask |= (1 << _CAT_OTROS_BIT)
+        # sin subtipo: si parece insumo/examen es "Otros"; si no, es traslado general
+        if any(k in n for k in _NO_TRASLADO):
+            mask |= (1 << _CAT_OTROS_BIT)
+        else:
+            mask |= 1   # bit 0 = Traslado de pacientes (general)
     return mask
 
 

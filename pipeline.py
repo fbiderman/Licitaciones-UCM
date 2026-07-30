@@ -823,10 +823,19 @@ def _origen_a_path(origen):
 
 def cmd_import_da(args):
     c = conn()
-    ruts = {_rut_norm(r["rut"]): r["alias"] for r in csv.DictReader(open(PROVIDERS, encoding="utf-8")) if r.get("rut")}
-    if not ruts:
-        print("No hay RUT en providers.csv."); return
-    print(f"Filtrando por {len(ruts)} RUT de proveedores.", flush=True)
+    if getattr(args, "reset", False) and not args.dry_run:
+        n = c.execute("DELETE FROM oc").rowcount
+        c.commit()
+        print(f"  reset: eliminadas {n} OC previas.", flush=True)
+    ruts = {_rut_norm(r["rut"]): r["alias"]
+            for r in csv.DictReader(open(PROVIDERS, encoding="utf-8")) if r.get("rut")} \
+        if os.path.exists(PROVIDERS) else {}
+    if getattr(args, "mercado", False):
+        print("Modo mercado completo: incluyo toda OC de traslado de pacientes (todos los proveedores).", flush=True)
+    else:
+        if not ruts:
+            print("No hay RUT en providers.csv."); return
+        print(f"Filtrando por {len(ruts)} RUT de proveedores.", flush=True)
 
     _OC_BASE = "https://transparenciachc.blob.core.windows.net/oc-da/"
     origenes = []
@@ -889,17 +898,34 @@ def cmd_import_da(args):
                 continue
 
             reader = csv.DictReader(fh, fieldnames=header, delimiter=sep)
+            # columnas para clasificar la OC como traslado de pacientes (modo mercado completo)
+            obj_cols_oc = [x for x in ["Nombre", "Descripcion/Obervaciones", "Descripcion",
+                                       "EspecificacionComprador", "EspecificacionProveedor"] if x in header]
+            onu_cols_oc = [x for x in ["codigoProductoONU", "CodigoProductoONU", "codigoProducto"] if x in header]
+
+            def _oc_es_traslado(row):
+                cl = _clasificar_traslado(row, obj_cols_oc, onu_cols_oc)
+                if cl == "servicio":
+                    return True
+                for oc in onu_cols_oc:
+                    if str(row.get(oc, "") or "").strip() == "92101902":
+                        return True
+                return False
+
             leidas = 0; coincide = 0; ins = 0
             for row in reader:
                 leidas += 1
                 if args.limit and leidas > args.limit:
                     break
                 rutp = _rut_norm(row.get(mapa["rut_proveedor"]))
-                if rutp not in ruts:
+                if args.mercado:
+                    if not _oc_es_traslado(row):
+                        continue
+                elif rutp not in ruts:
                     continue
                 coincide += 1
                 if args.dry_run and coincide == 1:
-                    print("\n  EJEMPLO (primera fila de un proveedor tuyo):", flush=True)
+                    print("\n  EJEMPLO (primera fila incluida):", flush=True)
                     for k, v in row.items():
                         vs = str(v or "").strip()
                         if vs:
@@ -924,7 +950,7 @@ def cmd_import_da(args):
                         comprador,
                         str(row.get(mapa.get("rut_comprador", ""), "") or "").strip(),
                         fecha,
-                        str(row.get(mapa.get("proveedor", ""), "") or ruts[rutp]).strip(),
+                        str(row.get(mapa.get("proveedor", ""), "") or ruts.get(rutp, "")).strip(),
                         rutp,
                         str(row.get(mapa.get("estado", ""), "") or "").strip(),
                         "CLP", 1.0, _parse_monto(row.get(mapa["monto"])),
@@ -936,7 +962,8 @@ def cmd_import_da(args):
                 c.commit()
             total_ins += ins
             estado_ins = "(dry-run, 0 insertadas)" if args.dry_run else f"{ins} insertadas/actualizadas"
-            print(f"  Leídas {leidas} filas · {coincide} de tus proveedores · {estado_ins}", flush=True)
+            etiqueta = "de traslado de pacientes (todo el mercado)" if args.mercado else "de tus proveedores"
+            print(f"  Leídas {leidas} filas · {coincide} {etiqueta} · {estado_ins}", flush=True)
         finally:
             fh.close()
             for t in temporales:
@@ -1390,6 +1417,8 @@ def main():
     da.add_argument("--desde", help="Rango: mes inicial AÑO-MES (ej: 2023-1).")
     da.add_argument("--hasta", help="Rango: mes final AÑO-MES (ej: 2026-6).")
     da.add_argument("--dir", default="datos_abiertos", help="Carpeta con archivos a importar (por defecto: datos_abiertos).")
+    da.add_argument("--mercado", action="store_true", help="Incluye TODA OC de traslado de pacientes (todo el mercado), sin filtrar por tus proveedores.")
+    da.add_argument("--reset", action="store_true", help="Borra todas las OC antes de cargar (para una recarga limpia del mercado completo).")
     da.add_argument("--dry-run", action="store_true", help="Solo muestra el mapeo de columnas y cuenta, sin guardar.")
     da.add_argument("--limit", type=int, default=0, help="Procesa solo las primeras N filas (para pruebas).")
     da.set_defaults(func=cmd_import_da)

@@ -512,14 +512,14 @@ def cmd_build(args):
     # OC asociadas por código de licitación (solo las que enlazan con una licitación cargada)
     lic_oc = {}
     try:
-        for cl, coco, nom, prov, fch, mon, est in c.execute("""
+        for o_cl, o_cod, o_nom, o_prov, o_fch, o_mon, o_est in c.execute("""
                 SELECT codigo_licitacion,codigo,nombre,proveedor,fecha,
                        monto_bruto*COALESCE(conversion_rate,1),estado
                 FROM oc WHERE codigo_licitacion IS NOT NULL AND codigo_licitacion<>''"""):
-            if cl in lic_codes:
-                lic_oc.setdefault(cl, []).append(
-                    {"c": coco or "", "n": nom or "", "p": prov or "",
-                     "f": (fch or "")[:10], "m": round(float(mon or 0)), "e": est or ""})
+            if o_cl in lic_codes:
+                lic_oc.setdefault(o_cl, []).append(
+                    {"c": o_cod or "", "n": o_nom or "", "p": o_prov or "",
+                     "f": (o_fch or "")[:10], "m": round(float(o_mon or 0)), "e": o_est or ""})
     except sqlite3.OperationalError:
         pass
     for k in lic_oc:

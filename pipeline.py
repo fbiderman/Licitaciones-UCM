@@ -403,6 +403,32 @@ _CAT_OTROS_BIT = len(_CATS)   # bit para "Otros"
 # nombres que NO son traslado (ruido que se cuela por el filtro amplio de OC)
 _NO_TRASLADO = ["examen", "cintigra", "linfocintig", "insumo", "oxigeno", "medicamento", "reactivo",
                 "accesorio", "bougie", "bajada infusion", "equipos medicos", "equipo medico"]
+# verbos que confirman que la OC es de transporte de pacientes
+_TRANSP_VERB = ["traslado", "transporte", "ambulancia", "movilizacion", "aeroevac", "evacuacion aer",
+                "aereo", "transbordador", "barcaza", "lancha", "rescate", "aeromedic"]
+
+
+def _oc_no_es_transporte(nombre):
+    """True si la OC NO es transporte de pacientes (tratamiento de diálisis, insumos, exámenes...)."""
+    n = _txtnorm(nombre)
+    # prestación de salud / contrato de diálisis: es tratamiento, no traslado (aunque lo mencione)
+    if "contrato dialisis" in n or ("prestacion" in n and ("salud" in n or "hemodial" in n or "dialisis" in n or "renal" in n)):
+        return True
+    if any(v in n for v in _TRANSP_VERB):
+        return False
+    if any(t in n for t in _NO_TRASLADO):
+        return True
+    if "dializ" in n or "hemodial" in n or "prestacion" in n or "tratamiento" in n:
+        return True
+    return False
+
+
+def _dur_meses(dur, unidad):
+    if not dur:
+        return 0
+    u = str(unidad or "").strip()
+    factor = {"4": 1, "5": 12, "3": 0.2306, "2": 0.0329, "1": 0.00137}.get(u, 1)
+    return int(round(dur * factor))
 
 
 def _catmask(nombre):
@@ -424,8 +450,42 @@ def cmd_build(args):
     c = conn()
     lic_mask = {cod: _catmask(nom) for cod, nom in
                 c.execute("SELECT codigo,nombre FROM licitacion")}
+    # duración (meses) y valor de contrato por licitación, para prorratear OC infladas
+    lic_info = {}
+    for cod, dur, unidad, madj, mest, cr in c.execute(
+            "SELECT codigo,duracion,duracion_unidad,monto_adjudicado,monto_estimado,conversion_rate FROM licitacion"):
+        D = _dur_meses(int(dur) if str(dur or "").strip().lstrip("-").isdigit() else 0, unidad)
+        val = max(float(madj or 0), float(mest or 0)) * float(cr or 1)
+        lic_info[cod] = (D, val)
     rows = c.execute("""SELECT anio,mes,proveedor,comprador,region,estado,tipo_orden,
                         monto_bruto*COALESCE(conversion_rate,1),nombre,codigo_licitacion FROM oc""").fetchall()
+    # mes tope para devengo: no reconocer meses futuros
+    cur_y, cur_m = 0, 0
+    for a, m, *_ in rows:
+        if (int(a or 0), int(m or 0)) > (cur_y, cur_m):
+            cur_y, cur_m = int(a or 0), int(m or 0)
+
+    def _prorratea(a, m, monto, codlic):
+        """Devuelve [(anio,mes,monto), ...] reconociendo mes a mes las OC infladas."""
+        info = lic_info.get(codlic) if codlic else None
+        if not info:
+            return [(a, m, monto)]
+        D, val = info
+        if D < 2 or val <= 0:
+            return [(a, m, monto)]
+        exp = val / D                                   # mensualidad esperada del contrato
+        if monto <= 1.5 * exp:
+            return [(a, m, monto)]                       # no es un lump, es un pago normal
+        k = max(2, min(int(round(monto / exp)), D))     # meses que cubre este pago
+        parte = monto / k
+        salida = []
+        for j in range(k):
+            yy = a + (m - 1 + j) // 12
+            mm = (m - 1 + j) % 12 + 1
+            if (yy, mm) <= (cur_y, cur_m):               # solo lo ya devengado, nada a futuro
+                salida.append((yy, mm, parte))
+        return salida or [(a, m, monto)]
+
     prov, comp, reg, est, tip = {}, {}, {}, {}, {}
     def idx(d, v):
         v = v or ""
@@ -433,15 +493,19 @@ def cmd_build(args):
     out = []
     total = 0
     for a, m, p, cp, rg, es, tp, monto, nom, codlic in rows:
-        monto = float(monto or 0); total += monto
-        mask = _catmask(nom)                                   # por el nombre de la OC
+        monto = float(monto or 0)
+        if _oc_no_es_transporte(nom):                    # excluye tratamiento/insumos/exámenes
+            continue
+        mask = _catmask(nom)
         if codlic and lic_mask.get(codlic):
-            mask |= lic_mask[codlic]                            # + categoría de su licitación
+            mask |= lic_mask[codlic]
         real = mask & ~(1 << _CAT_OTROS_BIT)
         if real:
-            mask = real                                        # si hay categoría real, no es "Otros"
-        out.append([int(a), int(m), idx(prov, p), idx(comp, cp), idx(reg, rg),
-                    idx(est, es), idx(tip, tp), round(monto), mask])
+            mask = real
+        pi, ci, ri, ei, ti = idx(prov, p), idx(comp, cp), idx(reg, rg), idx(est, es), idx(tip, tp)
+        for yy, mm, amt in _prorratea(int(a or 0), int(m or 0), monto, codlic):
+            total += amt
+            out.append([yy, mm, pi, ci, ri, ei, ti, round(amt), mask])
     inv = lambda d: [k for k, _ in sorted(d.items(), key=lambda kv: kv[1])]
     snap = (c.execute("SELECT valor FROM meta WHERE clave='snapshot'").fetchone() or
             [dt.date.today().isoformat()])[0]
@@ -505,14 +569,6 @@ def cmd_build(args):
     data_through = c.execute("SELECT MAX(fecha) FROM oc").fetchone()[0] or snap
 
     # ---- licitaciones (dos orígenes) con campos ricos ----
-    def _dur_meses(dur, unidad):
-        if not dur:
-            return 0
-        u = str(unidad or "").strip()
-        # códigos observados: 4 = meses. Otros aproximados.
-        factor = {"4": 1, "5": 12, "3": 0.2306, "2": 0.0329, "1": 0.00137}.get(u, 1)
-        return int(round(dur * factor))
-
     def _add_months(iso, months):
         if not (iso and len(iso) >= 7 and months):
             return ""
@@ -913,6 +969,9 @@ def cmd_import_da(args):
             onu_cols_oc = [x for x in ["codigoProductoONU", "CodigoProductoONU", "codigoProducto"] if x in header]
 
             def _oc_es_traslado(row):
+                nom = " ".join(str(row.get(cc, "") or "") for cc in obj_cols_oc)
+                if _oc_no_es_transporte(nom):
+                    return False                       # tratamiento/insumo, no traslado
                 cl = _clasificar_traslado(row, obj_cols_oc, onu_cols_oc)
                 if cl == "servicio":
                     return True

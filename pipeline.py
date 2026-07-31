@@ -408,7 +408,10 @@ _CAT_PRIO = ["mantencion", "adquisicion", "aereo", "dialisis", "arriendo", "urge
 _ADQ_WORDS = ["adquisicion", "adquuisicion", "reposicion", "compra de ambulancia", "compra ambulancia",
               "renovacion de ambulancia", "renovacion ambulancia"]
 _MANT_WORDS = ["mantencion", "mantenimiento", "reparacion"]
-_VEHIC_WORDS = ["ambulancia", "movil ", "movil-", "minibus", "furgon", "vehiculo", "camioneta"]
+_VEHIC_WORDS = ["ambulancia"]   # SOLO ambulancia (no 'vehiculo'/'movil': traía combustible y equipos)
+# proveedores que son vendedores/carroceros de ambulancias (sus ventas van a Adquisición)
+_VENDEDORES_AMB = ["kauffman", "bertonati", "conversiones san jose", "pena spoerer", "dikar",
+                   "carroceria", "carrocerias", "ecomax", "epysa"]
 
 
 def _es_adquisicion_amb(n):
@@ -417,6 +420,11 @@ def _es_adquisicion_amb(n):
 
 def _es_mantencion_amb(n):
     return any(mm in n for mm in _MANT_WORDS) and any(v in n for v in _VEHIC_WORDS)
+
+
+def _es_venta_vendedor(proveedor, nombre):
+    """Venta de ambulancia por un vendedor/carrocero conocido (aunque el nombre no diga 'adquisición')."""
+    return any(v in _txtnorm(proveedor) for v in _VENDEDORES_AMB) and "ambulancia" in _txtnorm(nombre)
 # nombres que NO son traslado (ruido que se cuela por el filtro amplio de OC)
 _NO_TRASLADO = ["examen", "cintigra", "linfocintig", "insumo", "oxigeno", "medicamento", "reactivo",
                 "accesorio", "bougie", "bajada infusion", "equipos medicos", "equipo medico",
@@ -430,7 +438,10 @@ _TRANSP_VERB = ["traslado", "transporte", "ambulancia", "movilizacion", "aeroeva
 _HARD_NO = ["internet", "satelital", "desfibrilador", "monitor", "camilla", "equipamiento",
             "equipos para ambulancia", "equipos-", "componente", "repuesto", "examen", "cintigra",
             "linfocintig", "reactivo", "bougie", "medicamento", "insumo", "accesorio",
-            "lamina de seguridad", "cubierta estacionamiento"]
+            "lamina de seguridad", "cubierta estacionamiento",
+            "combustible", "petroleo", "diesel", "gasolina", "bencina", "kerosene", "lubricante",
+            "neumatico", "bateria", "rayos x", "lubricacion", "gps",
+            "filtro", "adblue", "ad blue", "ad-blue", "aceite", "anticongelante"]
 # ruido "blando": solo si NO hay verbo de transporte
 _NO_TRASLADO = ["oxigeno", "equipos medicos", "equipo medico", "bajada infusion", "agua destilada"]
 
@@ -444,6 +455,12 @@ def _oc_no_es_transporte(nombre):
         return True                                     # tratamiento de diálisis (no traslado)
     if ("funcionario" in n) and not any(p in n for p in ("paciente", "usuario", "enfermo", "herido", "dializ")):
         return True                                     # traslado solo de funcionarios
+    # compra/reposición de VEHÍCULO que no es ambulancia (autos, camionetas, buses): fuera
+    if (any(a in n for a in ("adquisicion", "compra", "reposicion", "renovacion")) and
+            any(v in n for v in ("vehiculo", "camioneta", "automovil", "camion", "furgon", "minibus",
+                                 "station", "bus ", "jeep", "suv", "maquinaria", "equipo")) and
+            "ambulancia" not in n):
+        return True
     if _es_adquisicion_amb(n) or _es_mantencion_amb(n):
         return False                                    # compra/mantención de ambulancia: sí nos interesa
     if any(v in n for v in _TRANSP_VERB):
@@ -553,6 +570,8 @@ def cmd_build(args):
         if _oc_no_es_transporte(nom):                    # excluye tratamiento/insumos/exámenes
             continue
         mask = _catmask(nom) | _prov_mask(p)
+        if _es_venta_vendedor(p, nom):
+            mask |= (1 << _CAT_IDX["adquisicion"])
         if codlic and lic_mask.get(codlic):
             mask |= lic_mask[codlic]
         mask = _cat_single(mask)

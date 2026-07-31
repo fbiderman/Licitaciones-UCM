@@ -398,11 +398,31 @@ _CATS = [
      ["aereo", "aeroevac", "aeromedic", "evacuacion aer", "maritim", "lancha", "avion", "helicop"]),
     ("adquisicion", "Adquisición de ambulancias", []),   # detección compuesta (ver _es_adquisicion_amb)
     ("mantencion", "Mantención de ambulancias", []),      # detección compuesta (ver _es_mantencion_amb)
+    ("decreto80", "Accidentes laborales (Decreto 80)",
+     ["decreto 80", "dcto 80", "ds 80", "d s 80", "ley 16744", "accidente del trabajo", "accidente laboral"]),
 ]
 _CAT_OTROS_BIT = len(_CATS)   # bit para "Otros"
 _CAT_IDX = {cid: i for i, (cid, _lab, _kw) in enumerate(_CATS)}
 # prioridad para asignar UNA sola categoría cuando calza en varias
-_CAT_PRIO = ["mantencion", "adquisicion", "aereo", "dialisis", "arriendo", "urgencia", "aislado", "programa"]
+_CAT_PRIO = ["mantencion", "adquisicion", "aereo", "decreto80", "dialisis", "arriendo", "urgencia", "aislado", "programa"]
+# compradores de accidentes del trabajo (traslado Decreto 80, no ambulancia)
+_MUTUAL = ["seguridad laboral", "mutual", "asociacion chilena de seguridad",
+           "instituto de seguridad del trabajo", "achs"]
+
+
+def _es_mutual(comprador):
+    return any(m in _txtnorm(comprador) for m in _MUTUAL)
+
+
+# proveedores cuyo giro es prestación de salud (no transporte): sus OC solo entran si hablan de traslado
+_PRESTADOR_SALUD = ["clinica", "fundacion", "corporacion", "corp ", "corp.", "hospital", "centro medico",
+                    "sociedad medica", "radioterapia", "oncolog", "cancer", "dialisis", "nefro"]
+_GIRO_TRANSP = ["ambulancia", "traslado", "transporte", "rescate", "aeromedic", "movil"]
+
+
+def _es_prestador_salud(proveedor):
+    p = _txtnorm(proveedor)
+    return any(s in p for s in _PRESTADOR_SALUD) and not any(t in p for t in _GIRO_TRANSP)
 
 # --- detección compuesta de adquisición / mantención de ambulancias ---
 _ADQ_WORDS = ["adquisicion", "adquuisicion", "reposicion", "compra de ambulancia", "compra ambulancia",
@@ -446,7 +466,8 @@ _HARD_NO = ["internet", "satelital", "desfibrilador", "monitor", "camilla", "equ
             "lamina de seguridad", "cubierta estacionamiento",
             "combustible", "petroleo", "diesel", "gasolina", "bencina", "kerosene", "lubricante",
             "neumatico", "bateria", "rayos x", "lubricacion", "gps",
-            "filtro", "adblue", "ad blue", "ad-blue", "aceite", "anticongelante"]
+            "filtro", "adblue", "ad blue", "ad-blue", "aceite", "anticongelante",
+            "hospedaje", "casa de acogida", "residencia", "alojamiento", "hosteria", "pension completa"]
 # ruido "blando": solo si NO hay verbo de transporte
 _NO_TRASLADO = ["oxigeno", "equipos medicos", "equipo medico", "bajada infusion", "agua destilada"]
 
@@ -578,11 +599,16 @@ def cmd_build(args):
         # concesionaria/vendedor: solo su negocio de ambulancias (nombre con 'ambulancia' o enlazado a licitación)
         if _es_vendedor_amb(p) and "ambulancia" not in _txtnorm(nom) and not codlic:
             continue
+        # prestador de salud (clínica/fundación/corporación): solo si su OC habla de traslado
+        if _es_prestador_salud(p) and not any(t in _txtnorm(nom) for t in ("traslado", "transporte", "ambulancia")):
+            continue
         if (p or "") not in prov_rut and _rut_norm(rutp):
             prov_rut[p or ""] = _rut_norm(rutp)
         mask = _catmask(nom) | _prov_mask(p)
         if _es_venta_vendedor(p, nom):
             mask |= (1 << _CAT_IDX["adquisicion"])
+        if _es_mutual(cp):
+            mask |= (1 << _CAT_IDX["decreto80"])         # traslado de accidentes del trabajo (Decreto 80)
         if codlic and lic_mask.get(codlic):
             mask |= lic_mask[codlic]
         mask = _cat_single(mask)
@@ -687,7 +713,8 @@ def cmd_build(args):
             cod or "", nom or "", (fch or "")[:10],
             idx(lsub, sub or "general"), idx(ladj, adjn or ""), round(float(madj or 0)),
             (fadj or "")[:10], meses, (1 if renov == 1 else (0 if renov == 0 else -1)), vence,
-            _cat_single(_catmask(nom) | _prov_mask(adjn)), _rut_norm(adjrut)])
+            _cat_single(_catmask(nom) | _prov_mask(adjn) |
+                        ((1 << _CAT_IDX["decreto80"]) if _es_mutual(cp) else 0)), _rut_norm(adjrut)])
         if cod:
             lic_codes.add(cod)
             if ofe_json:
@@ -1065,6 +1092,8 @@ def cmd_import_da(args):
                 codlic = str(row.get(mapa.get("codigo_licitacion", ""), "") or "").strip()
                 if _es_vendedor_amb(prov) and "ambulancia" not in _txtnorm(nom) and not codlic:
                     return False                       # concesionaria: solo su negocio de ambulancias
+                if _es_prestador_salud(prov) and not any(t in _txtnorm(nom) for t in ("traslado", "transporte", "ambulancia")):
+                    return False                       # clínica/fundación: prestación médica, no traslado
                 n = _txtnorm(nom)
                 if _es_adquisicion_amb(n) or _es_mantencion_amb(n):
                     return True                        # compra o mantención de ambulancia

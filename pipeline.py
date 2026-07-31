@@ -386,7 +386,7 @@ def cmd_licitaciones(args):
 _CATS = [
     ("generico", "Traslado de pacientes (general)",
      ["traslado de pacient", "transporte de pacient", "traslado de usuario", "traslado de enfermo",
-      "traslado pacient", "ambulancia", "minibus", "traslado", "transporte", "movilizacion"]),
+      "traslado pacient", "ambulancia", "traslado", "transporte", "movilizacion"]),
     ("dialisis", "Diálisis / hemodiálisis", ["dialisis", "dializ", "hemodial", "nefrolog"]),
     ("arriendo", "Arriendo de ambulancias", ["arriendo", "arrendamiento", "alquiler"]),
     ("urgencia", "Urgencia / emergencia / SAMU", ["urgencia", "samu", "prehospital", "rescate"]),
@@ -400,11 +400,18 @@ _CATS = [
     ("mantencion", "Mantención de ambulancias", []),      # detección compuesta (ver _es_mantencion_amb)
     ("decreto80", "Accidentes laborales (Decreto 80)",
      ["decreto 80", "dcto 80", "ds 80", "d s 80", "ley 16744", "accidente del trabajo", "accidente laboral"]),
+    ("testeo", "Testeo de drogas y alcohol (SENDA)",
+     ["programa cero", "senda ", "alcotest", "narcotest", "test de drogas", "alcohol y otras drogas",
+      "operativos para el programa", "operativos programa"]),
+    ("vehiculo", "Traslado en vehículos (no ambulancia)",
+     ["vehiculo para traslado", "vehiculos para traslado", "vehiculo para el traslado", "furgon", "minibus",
+      "van para", "acercamiento", "bus para traslado", "moviliza y traslada"]),
 ]
-_CAT_OTROS_BIT = len(_CATS)   # bit para "Otros"
+_CAT_OTROS_BIT = len(_CATS)   # bit para "Sin identificar / otros"
 _CAT_IDX = {cid: i for i, (cid, _lab, _kw) in enumerate(_CATS)}
 # prioridad para asignar UNA sola categoría cuando calza en varias
-_CAT_PRIO = ["mantencion", "adquisicion", "aereo", "decreto80", "dialisis", "arriendo", "urgencia", "aislado", "programa"]
+_CAT_PRIO = ["mantencion", "adquisicion", "aereo", "decreto80", "dialisis", "arriendo", "urgencia",
+             "aislado", "programa", "testeo", "vehiculo"]
 # compradores de accidentes del trabajo (traslado Decreto 80, no ambulancia)
 _MUTUAL = ["seguridad laboral", "mutual", "asociacion chilena de seguridad",
            "instituto de seguridad del trabajo", "achs"]
@@ -432,7 +439,7 @@ _VEHIC_WORDS = ["ambulancia"]   # SOLO ambulancia (no 'vehiculo'/'movil': traía
 # proveedores que son vendedores/carroceros o concesionarias (su negocio general NO es traslado)
 _VENDEDORES_AMB = ["kaufmann", "bertonati", "conversiones san jose", "pena spoerer", "dikar",
                    "carroceria", "carrocerias", "ecomax", "epysa", "salinas y fabres",
-                   "gildemeister", "technology motor"]
+                   "gildemeister", "technology motor", "equitrans"]
 
 
 def _es_vendedor_amb(proveedor):
@@ -467,7 +474,19 @@ _HARD_NO = ["internet", "satelital", "desfibrilador", "monitor", "camilla", "equ
             "combustible", "petroleo", "diesel", "gasolina", "bencina", "kerosene", "lubricante",
             "neumatico", "bateria", "rayos x", "lubricacion", "gps",
             "filtro", "adblue", "ad blue", "ad-blue", "aceite", "anticongelante",
-            "hospedaje", "casa de acogida", "residencia", "alojamiento", "hosteria", "pension completa"]
+            "hospedaje", "casa de acogida", "residencia", "alojamiento", "hosteria", "pension completa",
+            "cirugia", "quirurgic", "horas profesionales", "horas medicas",
+            "seguro", "poliza", "soap",                          # seguros de vehículos/ambulancias
+            "ventilador", "incubadora", "humificador", "humidificador",   # equipos médicos "de transporte"
+            "veterinari", "ginecologic", "clinica movil", "clinicas movil", "salud movil",  # clínicas móviles (vehículos especiales)
+            "materiales electricos", "pasajes", "interurbano",
+            "traslado interno", "ecmo"]
+# traslado/transporte de NO-pacientes (si no menciona paciente, queda fuera)
+_NO_PACIENTE_OBJ = ["funcionario", "pasajero", "alumno", "estudiante", "escolar", "personal de",
+                    "muestra", "residuo", "valija", "correspondencia", "encomienda", "mercader",
+                    "mobiliario", "documento", "equipaje", "insumos", "carga"]
+_PAC_WORDS = ["paciente", "usuario", "enfermo", "dializ", "hemodial", "herido", "postrad",
+              "ambulancia", "samu", "hosdom", "hospitalizacion domiciliaria", "domiciliar"]
 # ruido "blando": solo si NO hay verbo de transporte
 _NO_TRASLADO = ["oxigeno", "equipos medicos", "equipo medico", "bajada infusion", "agua destilada"]
 
@@ -481,6 +500,10 @@ def _oc_no_es_transporte(nombre):
         return True                                     # tratamiento de diálisis (no traslado)
     if ("funcionario" in n) and not any(p in n for p in ("paciente", "usuario", "enfermo", "herido", "dializ")):
         return True                                     # traslado solo de funcionarios
+    # traslado/transporte de cosas o personas que no son pacientes
+    if any(v in n for v in ("traslado", "transporte")) and any(o in n for o in _NO_PACIENTE_OBJ) \
+            and not any(p in n for p in _PAC_WORDS):
+        return True
     # compra/reposición de VEHÍCULO que no es ambulancia (autos, camionetas, buses): fuera
     if (any(a in n for a in ("adquisicion", "compra", "reposicion", "renovacion")) and
             any(v in n for v in ("vehiculo", "camioneta", "automovil", "camion", "furgon", "minibus",
@@ -506,23 +529,33 @@ def _dur_meses(dur, unidad):
     return int(round(dur * factor))
 
 
-_SPEC_BITS = sum(1 << i for i in range(1, len(_CATS)))   # bits 1..8 (categorías específicas)
+_SPEC_BITS = sum(1 << i for i in range(1, len(_CATS)))   # bits de categorías específicas
 _PROV_AEREO = ["aeromedic", "aviacion", "aerocardal", "helicop", "aereo", "aerea", "aero ", "aeronaut"]
+_PROV_BUS = ["buses", "bus ", " bus", "pullman", "turismo", " tour", "travel", "expreso", "taxi"]
 
 
 def _prov_mask(proveedor):
-    """Señal de categoría por el rubro del proveedor (hoy: aéreo/marítimo)."""
+    """Señal de categoría por el rubro del proveedor (aéreo; buses/turismo -> vehículos)."""
     p = _txtnorm(proveedor)
     if any(k in p for k in _PROV_AEREO):
-        return (1 << 6)     # bit 6 = Aéreo / marítimo
+        return (1 << _CAT_IDX["aereo"])
+    if any(k in p for k in _PROV_BUS) and "ambulancia" not in p:
+        return (1 << _CAT_IDX["vehiculo"])   # empresa de buses/turismo: traslada pacientes en bus/van
     return 0
+
+
+def _es_mixto_funcionarios(nombre):
+    """Contrato mixto funcionarios+pacientes: ronda/acercamiento en bus o van, no ambulancia."""
+    n = _txtnorm(nombre)
+    return "funcionario" in n and any(p in n for p in ("paciente", "usuario"))
 
 
 def _catmask(nombre):
     n = _txtnorm(nombre)
     spec = 0
-    for i in range(1, _CAT_IDX["aereo"] + 1):      # categorías por palabra (diálisis..aéreo)
-        if any(k in n for k in _CATS[i][2]):
+    for i in range(1, len(_CATS)):                  # todas las categorías específicas con keywords
+        kws = _CATS[i][2]
+        if kws and any(k in n for k in kws):
             spec |= (1 << i)
     if _es_adquisicion_amb(n):
         spec |= (1 << _CAT_IDX["adquisicion"])
@@ -594,9 +627,13 @@ def cmd_build(args):
     pre = []
     p_gen = {}      # proveedor -> monto en general
     p_spec = {}     # proveedor -> {bit: monto} en categorías específicas
+    p_excl = {}     # proveedor -> monto excluido por no ser transporte (cirugías, insumos...)
+    p_tot = {}      # proveedor -> monto total incluido
+    p_evid = {}     # proveedor -> monto con evidencia de traslado de pacientes
     for a, m, p, cp, rg, es, tp, monto, nom, codlic, rutp in rows:
         monto = float(monto or 0)
         if _oc_no_es_transporte(nom):                    # excluye tratamiento/insumos/exámenes
+            p_excl[p] = p_excl.get(p, 0) + monto
             continue
         # concesionaria/vendedor: solo su negocio de ambulancias (nombre con 'ambulancia' o enlazado a licitación)
         if _es_vendedor_amb(p) and "ambulancia" not in _txtnorm(nom) and not codlic:
@@ -607,6 +644,8 @@ def cmd_build(args):
         if (p or "") not in prov_rut and _rut_norm(rutp):
             prov_rut[p or ""] = _rut_norm(rutp)
         mask = _catmask(nom) | _prov_mask(p)
+        if _es_mixto_funcionarios(nom):
+            mask |= (1 << _CAT_IDX["vehiculo"])          # ronda funcionarios+pacientes: bus/van
         if _es_venta_vendedor(p, nom):
             mask |= (1 << _CAT_IDX["adquisicion"])
         if _es_mutual(cp):
@@ -617,6 +656,9 @@ def cmd_build(args):
         if _es_vendedor_amb(p) and mask == 1:            # una concesionaria no hace traslado: es compra/mantención
             mask = (1 << _CAT_IDX["mantencion"]) if _es_mantencion_amb(_txtnorm(nom)) else (1 << _CAT_IDX["adquisicion"])
         pre.append((int(a or 0), int(m or 0), p, cp, rg, es, tp, monto, mask, codlic))
+        p_tot[p] = p_tot.get(p, 0) + monto
+        if mask != 1 or (codlic and codlic in lic_mask) or any(w in _txtnorm(nom) for w in _PAC_WORDS):
+            p_evid[p] = p_evid.get(p, 0) + monto        # evidencia de que este proveedor es de traslado
         if mask == 1:
             p_gen[p] = p_gen.get(p, 0) + monto
         elif not (mask & (1 << _CAT_OTROS_BIT)):
@@ -632,12 +674,19 @@ def cmd_build(args):
         top_bit, top_v = max(spec.items(), key=lambda kv: kv[1])
         if top_v / stot >= 0.7 and stot >= 0.3 * (stot + gv):
             p_reasig[p] = top_bit
+        elif top_bit == (1 << _CAT_IDX["vehiculo"]) and top_v / stot >= 0.5 and stot >= 0.3 * (stot + gv):
+            p_reasig[p] = top_bit                        # empresa de buses/vans: umbral más laxo
     # ---- pasada 2: prorrateo y salida ----
     out = []
     total = 0
     for a, m, p, cp, rg, es, tp, monto, mask, codlic in pre:
-        if mask == 1 and p in p_reasig:
-            mask = p_reasig[p]
+        if mask == 1:
+            if p_excl.get(p, 0) > 0.5 * (p_excl.get(p, 0) + p_tot.get(p, 0)):
+                continue                                 # proveedor mayormente NO-transporte: su genérica también sale
+            if p_evid.get(p, 0) < 0.2 * p_tot.get(p, 1) and p_evid.get(p, 0) < 150e6:
+                mask = (1 << _CAT_OTROS_BIT)             # sin evidencia: va a "Sin identificar", no ensucia traslados
+            elif p in p_reasig:
+                mask = p_reasig[p]
         pi, ci, ri, ei, ti = idx(prov, p), idx(comp, cp), idx(reg, rg), idx(est, es), idx(tip, tp)
         for yy, mm, amt in _prorratea(a, m, monto, codlic):
             total += amt
@@ -738,6 +787,7 @@ def cmd_build(args):
             idx(lsub, sub or "general"), idx(ladj, adjn or ""), round(float(madj or 0)),
             (fadj or "")[:10], meses, (1 if renov == 1 else (0 if renov == 0 else -1)), vence,
             _cat_single(_catmask(nom) | _prov_mask(adjn) |
+                        ((1 << _CAT_IDX["vehiculo"]) if _es_mixto_funcionarios(nom) else 0) |
                         ((1 << _CAT_IDX["decreto80"]) if _es_mutual(cp) else 0)), _rut_norm(adjrut)])
         if cod:
             lic_codes.add(cod)
@@ -773,7 +823,7 @@ def cmd_build(args):
                      "rows": len(out), "total_clp": int(total), "fx": fx, "uf_ref": uf_ref,
                      "uf_by_year": uf_by_year,
                      "cats": [{"id": cid, "label": lab} for cid, lab, _ in _CATS]
-                             + [{"id": "otros", "label": "Otros / sin categoría"}]},
+                             + [{"id": "otros", "label": "Sin identificar / otros"}]},
             "prov": inv(prov), "provRut": [prov_rut.get(nm, "") for nm in inv(prov)],
             "comp": inv(comp), "reg": inv(reg),
             "est": inv(est), "tip": inv(tip), "rows": out,

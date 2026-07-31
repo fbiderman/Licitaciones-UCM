@@ -590,8 +590,10 @@ def cmd_build(args):
     def idx(d, v):
         v = v or ""
         return d.setdefault(v, len(d))
-    out = []
-    total = 0
+    # ---- pasada 1: clasificar cada OC y acumular por proveedor (para inferir especialización) ----
+    pre = []
+    p_gen = {}      # proveedor -> monto en general
+    p_spec = {}     # proveedor -> {bit: monto} en categorías específicas
     for a, m, p, cp, rg, es, tp, monto, nom, codlic, rutp in rows:
         monto = float(monto or 0)
         if _oc_no_es_transporte(nom):                    # excluye tratamiento/insumos/exámenes
@@ -614,8 +616,30 @@ def cmd_build(args):
         mask = _cat_single(mask)
         if _es_vendedor_amb(p) and mask == 1:            # una concesionaria no hace traslado: es compra/mantención
             mask = (1 << _CAT_IDX["mantencion"]) if _es_mantencion_amb(_txtnorm(nom)) else (1 << _CAT_IDX["adquisicion"])
+        pre.append((int(a or 0), int(m or 0), p, cp, rg, es, tp, monto, mask, codlic))
+        if mask == 1:
+            p_gen[p] = p_gen.get(p, 0) + monto
+        elif not (mask & (1 << _CAT_OTROS_BIT)):
+            p_spec.setdefault(p, {})[mask] = p_spec.get(p, {}).get(mask, 0) + monto
+    # especialización: si ≥70% de lo clasificable de un proveedor es UNA categoría y pesa ≥30% de su total,
+    # sus OC genéricas se asignan a esa categoría (ej.: Ossafernández -> diálisis, talleres -> mantención)
+    p_reasig = {}
+    for p, spec in p_spec.items():
+        stot = sum(spec.values())
+        gv = p_gen.get(p, 0)
+        if stot <= 0 or gv <= 0:
+            continue
+        top_bit, top_v = max(spec.items(), key=lambda kv: kv[1])
+        if top_v / stot >= 0.7 and stot >= 0.3 * (stot + gv):
+            p_reasig[p] = top_bit
+    # ---- pasada 2: prorrateo y salida ----
+    out = []
+    total = 0
+    for a, m, p, cp, rg, es, tp, monto, mask, codlic in pre:
+        if mask == 1 and p in p_reasig:
+            mask = p_reasig[p]
         pi, ci, ri, ei, ti = idx(prov, p), idx(comp, cp), idx(reg, rg), idx(est, es), idx(tip, tp)
-        for yy, mm, amt in _prorratea(int(a or 0), int(m or 0), monto, codlic):
+        for yy, mm, amt in _prorratea(a, m, monto, codlic):
             total += amt
             out.append([yy, mm, pi, ci, ri, ei, ti, round(amt), mask])
     inv = lambda d: [k for k, _ in sorted(d.items(), key=lambda kv: kv[1])]

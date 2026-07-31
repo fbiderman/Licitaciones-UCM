@@ -531,7 +531,7 @@ def cmd_build(args):
         val = max(float(madj or 0), float(mest or 0)) * float(cr or 1)
         lic_info[cod] = (D, val)
     rows = c.execute("""SELECT anio,mes,proveedor,comprador,region,estado,tipo_orden,
-                        monto_bruto*COALESCE(conversion_rate,1),nombre,codigo_licitacion FROM oc""").fetchall()
+                        monto_bruto*COALESCE(conversion_rate,1),nombre,codigo_licitacion,rut_proveedor FROM oc""").fetchall()
     # mes tope para devengo: no reconocer meses futuros
     cur_y, cur_m = 0, 0
     for a, m, *_ in rows:
@@ -560,15 +560,18 @@ def cmd_build(args):
         return salida or [(a, m, monto)]
 
     prov, comp, reg, est, tip = {}, {}, {}, {}, {}
+    prov_rut = {}                                       # nombre proveedor -> RUT normalizado
     def idx(d, v):
         v = v or ""
         return d.setdefault(v, len(d))
     out = []
     total = 0
-    for a, m, p, cp, rg, es, tp, monto, nom, codlic in rows:
+    for a, m, p, cp, rg, es, tp, monto, nom, codlic, rutp in rows:
         monto = float(monto or 0)
         if _oc_no_es_transporte(nom):                    # excluye tratamiento/insumos/exámenes
             continue
+        if (p or "") not in prov_rut and _rut_norm(rutp):
+            prov_rut[p or ""] = _rut_norm(rutp)
         mask = _catmask(nom) | _prov_mask(p)
         if _es_venta_vendedor(p, nom):
             mask |= (1 << _CAT_IDX["adquisicion"])
@@ -658,11 +661,11 @@ def cmd_build(args):
     lic_ofe = {}     # codigo -> [oferentes]
     lic_codes = set()
     for (orig, a, mm, cp, rg, es, monto, adjd, cod, nom, fch, sub, adjn,
-         madj, fini, ffin, fadj, dur, durU, renov, ofe_json) in c.execute("""
+         madj, fini, ffin, fadj, dur, durU, renov, ofe_json, adjrut) in c.execute("""
             SELECT origen,anio,mes,comprador,region,estado,
                    monto_estimado*COALESCE(conversion_rate,1),adjudicada,codigo,nombre,fecha,
                    subtipo,adjudicatario,monto_adjudicado,fecha_inicio,fecha_final,
-                   fecha_adjudicacion,duracion,duracion_unidad,renovable,oferentes
+                   fecha_adjudicacion,duracion,duracion_unidad,renovable,oferentes,rut_adjudicatario
             FROM licitacion"""):
         meses = _dur_meses(int(dur) if str(dur or "").strip().lstrip("-").isdigit() else 0, durU)
         ancla = (fadj or "")[:10] or (fini or "")[:10]
@@ -674,13 +677,15 @@ def cmd_build(args):
             cod or "", nom or "", (fch or "")[:10],
             idx(lsub, sub or "general"), idx(ladj, adjn or ""), round(float(madj or 0)),
             (fadj or "")[:10], meses, (1 if renov == 1 else (0 if renov == 0 else -1)), vence,
-            _cat_single(_catmask(nom) | _prov_mask(adjn))])
+            _cat_single(_catmask(nom) | _prov_mask(adjn)), _rut_norm(adjrut)])
         if cod:
             lic_codes.add(cod)
             if ofe_json:
                 try:
                     ol = json.loads(ofe_json)
                     if ol:
+                        for o in ol:
+                            o["r"] = _rut_norm(o.get("r"))   # normaliza RUT de cada oferente
                         lic_ofe[cod] = ol
                 except (ValueError, TypeError):
                     pass
@@ -708,7 +713,8 @@ def cmd_build(args):
                      "uf_by_year": uf_by_year,
                      "cats": [{"id": cid, "label": lab} for cid, lab, _ in _CATS]
                              + [{"id": "otros", "label": "Otros / sin categoría"}]},
-            "prov": inv(prov), "comp": inv(comp), "reg": inv(reg),
+            "prov": inv(prov), "provRut": [prov_rut.get(nm, "") for nm in inv(prov)],
+            "comp": inv(comp), "reg": inv(reg),
             "est": inv(est), "tip": inv(tip), "rows": out,
             "roster": roster, "candidates": cand, "lic": lic}
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))

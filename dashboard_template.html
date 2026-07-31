@@ -195,8 +195,9 @@
   <nav class="pages"><div class="wrap"><ul>
     <li><a href="#" class="active" data-page="inicio">Inicio</a></li>
     <li><a href="#" data-page="mercado">Mercado Total</a></li>
-    <li><a class="soon">Participación</a></li>
-    <li><a class="soon">Compradores</a></li>
+    <li><a href="#" data-page="participacion">Participación</a></li>
+    <li><a href="#" data-page="compradores">Compradores</a></li>
+    <li><a href="#" data-page="proveedor">Ficha proveedor</a></li>
     <li><a href="#" data-page="licitaciones">Licitaciones</a></li>
   </ul></div></nav>
 </header>
@@ -344,6 +345,99 @@
         <div class="searchbar"><input type="search" id="lic-search" placeholder="Filtrar por texto…"></div>
         <div class="tblwrap"><table class="tbl" id="lic-table"></table></div>
         <div class="tblnote" id="lic-tblnote"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="page" id="page-participacion" hidden>
+    <section class="hero">
+      <div class="eyebrow">Participación de mercado · Chile</div>
+      <h1>Participación</h1>
+      <p>Cuánto del mercado de traslado concentra cada proveedor, cómo se reparte y cómo se mueve en el tiempo. Respeta las categorías elegidas en Inicio. UCM en rojo.</p>
+    </section>
+    <div class="controls"><span class="note">Año:</span><span id="part-years" class="chips"></span></div>
+    <section class="kpis" id="part-kpis"></section>
+    <section class="card">
+      <div class="head"><div><h2><span class="dot"></span>Ranking de participación</h2>
+        <p class="hint">Proveedores por monto (devengado). Top 20 + resto.</p></div></div>
+      <div id="part-rank"></div>
+    </section>
+    <section class="card">
+      <div class="head"><div><h2><span class="dot"></span>Participación en el tiempo</h2>
+        <p class="hint">Cómo se reparte el mercado entre los principales proveedores, año a año.</p></div></div>
+      <div id="part-time"></div>
+    </section>
+  </section>
+
+  <section class="page" id="page-compradores" hidden>
+    <section class="hero">
+      <div class="eyebrow">Compradores del Estado · Chile</div>
+      <h1>Compradores</h1>
+      <p>Qué organismos públicos compran más traslado, a quién le compran y cómo evoluciona. Haz clic en un comprador para ver su detalle. Respeta las categorías elegidas en Inicio.</p>
+    </section>
+    <div class="controls"><span class="note">Año:</span><span id="comp-years" class="chips"></span></div>
+    <section class="kpis" id="comp-kpis"></section>
+    <section class="card">
+      <div class="head"><div><h2><span class="dot"></span>Ranking de compradores</h2>
+        <p class="hint">Organismos por gasto (devengado). Clic para ver su detalle.</p></div>
+        <button class="clearf" id="comp-clear" style="display:none">✕ quitar comprador</button></div>
+      <div id="comp-rank"></div>
+    </section>
+    <section class="card" id="comp-detail" hidden>
+      <div class="head"><div><h2><span class="dot"></span>Detalle · <span id="comp-detail-name"></span></h2>
+        <p class="hint">Sus principales proveedores y en qué categorías gasta.</p></div></div>
+      <div class="two">
+        <div><h3 style="font:700 13px var(--body);color:var(--slate);margin:0 0 6px">Proveedores</h3><div id="comp-provs"></div></div>
+        <div><h3 style="font:700 13px var(--body);color:var(--slate);margin:0 0 6px">Categorías</h3><div id="comp-cats"></div></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="head"><div><h2><span class="dot"></span>Compras en el tiempo</h2>
+        <p class="hint">Gasto anual de los principales compradores.</p></div></div>
+      <div id="comp-time"></div>
+    </section>
+  </section>
+
+  <section class="page" id="page-proveedor" hidden>
+    <section class="hero">
+      <div class="eyebrow">Ficha de proveedor · Chile</div>
+      <h1>Ficha de proveedor</h1>
+      <p>Elige un proveedor y ve todo: cuánto recibe, en qué categorías, sus compradores, sus licitaciones adjudicadas, su pipeline de vencimientos y su desempeño en ofertas (gana vs pierde). Respeta las categorías de Inicio.</p>
+    </section>
+    <section class="card">
+      <div class="head"><div><h2><span class="dot"></span>Proveedor</h2>
+        <p class="hint">Busca y selecciona. Ordenados por monto recibido.</p></div></div>
+      <div class="searchbar"><input type="search" id="prov-search" placeholder="Buscar proveedor…"></div>
+      <div class="ranklist" id="prov-list" style="max-height:240px"></div>
+    </section>
+    <div class="lic-empty" id="prov-empty">Elige un proveedor arriba para ver su ficha completa.</div>
+    <div id="prov-body" hidden>
+      <section class="hero" style="padding:16px 22px;margin-bottom:14px"><h1 id="prov-name" style="font-size:22px;margin:0"></h1></section>
+      <section class="kpis" id="prov-kpis"></section>
+      <section class="card">
+        <div class="head"><div><h2><span class="dot"></span>Evolución en el tiempo</h2>
+          <p class="hint">Monto recibido por año (devengado).</p></div></div>
+        <div id="prov-annual"></div>
+      </section>
+      <div class="two">
+        <section class="card"><div class="head"><div><h2><span class="dot"></span>Por categoría</h2></div></div><div id="prov-cats"></div></section>
+        <section class="card"><div class="head"><div><h2><span class="dot"></span>Principales compradores</h2></div></div><div id="prov-buyers"></div></section>
+      </div>
+      <section class="card">
+        <div class="head"><div><h2><span class="dot"></span>Ofertas: gana vs pierde</h2>
+          <p class="hint">A cuántas licitaciones ofertó, cuántas ganó y cuántas perdió.</p></div></div>
+        <div id="prov-ofertas"></div>
+      </section>
+      <section class="card">
+        <div class="head"><div><h2><span class="dot"></span>Licitaciones adjudicadas</h2></div></div>
+        <div class="tblwrap"><table class="tbl" id="prov-won"></table></div>
+        <div class="tblnote" id="prov-won-note"></div>
+      </section>
+      <section class="card">
+        <div class="head"><div><h2><span class="dot"></span>Pipeline de vencimientos</h2>
+          <p class="hint">Sus contratos vigentes ordenados por cuándo vencen.</p></div></div>
+        <div class="tblwrap" style="max-height:360px"><table class="tbl" id="prov-pipe"></table></div>
+        <div class="tblnote" id="prov-pipe-note"></div>
       </section>
     </div>
   </section>
@@ -691,13 +785,109 @@ document.querySelectorAll('nav.pages a[data-page]').forEach(a=>{
     a.classList.add('active');
     if(p==='licitaciones') licPaint();
     if(p==='mercado') paint();
+    if(p==='participacion') partPaint();
+    if(p==='compradores') compPaint();
+    if(p==='proveedor') provPaint();
     window.scrollTo(0,0);
   });
 });
 
+/* ================= Participación y Compradores ================= */
+const PALETTE=["#244F94","#498CDF","#6AC9FF","#2A578E","#22A06B","#E8A33D","#9B7FD0","#5E6C82","#D06BA3","#7BA3D0"];
+function yearsOf(){ return [...new Set(base.map(r=>r[A]))].filter(y=>y>0).sort((a,b)=>a-b); }
+function yearChips(elId,cur,fn){
+  const ys=yearsOf();
+  document.getElementById(elId).innerHTML =
+    `<span class="chip click ${cur==='all'?'sel':''}" onclick="${fn}('all')"><div class="l">Todos</div></span>`+
+    ys.map(y=>`<span class="chip click ${cur===y?'sel':''}" onclick="${fn}(${y})"><div class="l">${y}</div></span>`).join("");
+}
+function stackedByYear(elId,rows,keyIdx,dict,topN){
+  const ys=yearsOf();
+  const tot={}; rows.forEach(r=>{ tot[r[keyIdx]]=(tot[r[keyIdx]]||0)+valOf(r); });
+  const top=Object.entries(tot).sort((a,b)=>b[1]-a[1]).slice(0,topN).map(e=>Number(e[0]));
+  const topset=new Set(top);
+  const sums={}; ys.forEach(y=>sums[y]={});
+  rows.forEach(r=>{ const y=r[A]; if(!sums[y])return; const k=topset.has(r[keyIdx])?r[keyIdx]:"otros"; sums[y][k]=(sums[y][k]||0)+valOf(r); });
+  const series=[...top,"otros"];
+  const label=k=>k==="otros"?"Otros":(dict[k]||"—");
+  const color=(k,i)=>k==="otros"?"#C3C7CC":PALETTE[i%PALETTE.length];
+  const totals=ys.map(y=>series.reduce((s,k)=>s+(sums[y][k]||0),0));
+  const max=Math.max(...totals,1);
+  const W=1000,H=280,padL=54,padR=10,padT=16,padB=34,plotH=H-padT-padB;
+  const bw=(W-padL-padR)/Math.max(ys.length,1);
+  let g="";
+  for(let i=0;i<=4;i++){const gy=padT+plotH*i/4;g+=`<g class="grid"><line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}"/><text class="axis" x="${padL-8}" y="${gy+4}" text-anchor="end">${short(max*(1-i/4))}</text></g>`;}
+  let bars="";
+  ys.forEach((y,i)=>{const x=padL+i*bw+bw*0.16,w=bw*0.68;let acc=0,seg="";
+    series.forEach((k,si)=>{const v=sums[y][k]||0; if(v<=0)return; const hh=plotH*(v/max),yy=H-padB-acc-hh;acc+=hh;
+      seg+=`<rect x="${x}" y="${yy}" width="${w}" height="${Math.max(hh,0.5)}" fill="${color(k,si)}"><title>${y} · ${label(k)}: ${money(v)}</title></rect>`;});
+    bars+=`<g>${seg}<text class="barval" x="${x+w/2}" y="${H-padB-acc-6}" text-anchor="middle">${short(totals[i])}</text><text class="axis" x="${x+w/2}" y="${H-padB+16}" text-anchor="middle">${y}</text></g>`;});
+  const leg=series.map((k,si)=>`<span><i style="background:${color(k,si)}"></i>${label(k).slice(0,24)}</span>`).join("");
+  document.getElementById(elId).innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${g}${bars}</svg><div class="legend">${leg}</div>`;
+}
+
+let partYear="all";
+function partScope(){ return base.filter(r=>partYear==="all"||r[A]===partYear); }
+function selPartYear(y){ partYear=y; partPaint(); }
+function partPaint(){
+  yearChips("part-years",partYear,"selPartYear");
+  const rs=partScope(); const agg={}; let total=0;
+  rs.forEach(r=>{const v=valOf(r); agg[r[P]]=(agg[r[P]]||0)+v; total+=v;});
+  const arr=Object.entries(agg).map(([k,v])=>({k:Number(k),name:DATA.prov[k]||"—",v,ucm:isUCM(DATA.prov[k])})).sort((a,b)=>b.v-a.v);
+  const ucm=arr.find(a=>a.ucm); const ucmpct=ucm&&total?ucm.v/total*100:0;
+  const top5=arr.slice(0,5).reduce((s,a)=>s+a.v,0);
+  const hhi=total?arr.reduce((s,a)=>s+Math.pow(a.v/total*100,2),0):0;
+  const k=[["Proveedores activos",nf.format(arr.length),partYear==="all"?"todo el período":("año "+partYear)],
+    ["Participación UCM",ucmpct.toFixed(1)+"%",ucm?short(ucm.v):"—"],
+    ["Concentración top 5",total?(top5/total*100).toFixed(0)+"%":"—","del mercado"],
+    ["HHI",Math.round(hhi).toLocaleString("es-CL"),hhi<1500?"poco concentrado":(hhi<2500?"moderado":"concentrado")]];
+  document.getElementById("part-kpis").innerHTML=k.map(([l,v,s])=>`<div class="kpi"><div class="lab">${l}</div><div class="val">${v}</div><div class="sub">${s}</div></div>`).join("");
+  let pairs=arr.slice(0,20).map(a=>({name:a.name,v:a.v,ucm:a.ucm}));
+  const shown=new Set(arr.slice(0,20).map(a=>a.k));
+  if(ucm && !shown.has(ucm.k)) pairs.push({name:ucm.name,v:ucm.v,ucm:true});
+  const restV=arr.filter(a=>!shown.has(a.k)&&!(ucm&&a.k===ucm.k)).reduce((s,a)=>s+a.v,0);
+  if(restV>0) pairs.push({name:"Otros proveedores",v:restV,ucm:false});
+  hbars("part-rank",pairs);
+  stackedByYear("part-time",base,P,DATA.prov,7);
+}
+
+let compYear="all", compSel=null;
+function compScope(){ return base.filter(r=>compYear==="all"||r[A]===compYear); }
+function selCompYear(y){ compYear=y; compPaint(); }
+function selComprador(k){ compSel=(compSel===k?null:k); compPaint(); }
+function compPaint(){
+  yearChips("comp-years",compYear,"selCompYear");
+  const rs=compScope(); const agg={}; let total=0;
+  rs.forEach(r=>{const v=valOf(r); agg[r[C]]=(agg[r[C]]||0)+v; total+=v;});
+  const arr=Object.entries(agg).map(([k,v])=>({k:Number(k),name:DATA.comp[k]||"—",v})).sort((a,b)=>b.v-a.v);
+  const top=arr[0]; const top5=arr.slice(0,5).reduce((s,a)=>s+a.v,0);
+  const k=[["Compradores",nf.format(arr.length),compYear==="all"?"todo el período":("año "+compYear)],
+    ["Mayor comprador",top?short(top.v):"—",top?top.name.slice(0,24):""],
+    ["Concentración top 5",total?Math.round(top5/total*100)+"%":"—","del gasto"],
+    ["Gasto total",short(total),"devengado"]];
+  document.getElementById("comp-kpis").innerHTML=k.map(([l,v,s])=>`<div class="kpi"><div class="lab">${l}</div><div class="val">${v}</div><div class="sub">${s}</div></div>`).join("");
+  let pairs=arr.slice(0,20).map(a=>({name:a.name,v:a.v,key:a.k,ucm:(compSel===a.k)}));
+  const restV=arr.slice(20).reduce((s,a)=>s+a.v,0);
+  if(restV>0) pairs.push({name:"Otros compradores",v:restV});
+  hbars("comp-rank",pairs,"selComprador");
+  document.getElementById("comp-clear").style.display=compSel!==null?"":"none";
+  const dc=document.getElementById("comp-detail");
+  if(compSel!==null){
+    dc.hidden=false;
+    document.getElementById("comp-detail-name").textContent=(DATA.comp[compSel]||"").slice(0,50);
+    const sub=rs.filter(r=>r[C]===compSel);
+    const pa={}; sub.forEach(r=>{pa[r[P]]=(pa[r[P]]||0)+valOf(r);});
+    hbars("comp-provs",Object.entries(pa).map(([k,v])=>({name:DATA.prov[k]||"—",v,ucm:isUCM(DATA.prov[k])})).sort((a,b)=>b.v-a.v).slice(0,10));
+    const ca={}; sub.forEach(r=>{for(let i=0;i<CATS.length;i++){if(r[CB]&(1<<i)){ca[i]=(ca[i]||0)+valOf(r);break;}}});
+    hbars("comp-cats",Object.entries(ca).map(([i,v])=>({name:CATS[i].label,v})).sort((a,b)=>b.v-a.v));
+  } else dc.hidden=true;
+  stackedByYear("comp-time",base,C,DATA.comp,7);
+}
+document.getElementById("comp-clear").addEventListener("click",()=>{compSel=null;compPaint();});
+
 /* ================= Licitaciones ================= */
 const L = DATA.lic || {rows:[],reg:[],est:[],comp:[],sub:[],adj:[]};
-const LO=0,LA=1,LM=2,LC=3,LR=4,LE=5,LMO=6,LADJ=7,LCOD=8,LNOM=9,LF=10,LSUB=11,LADJI=12,LMADJ=13,LFADJ=14,LDUR=15,LRENOV=16,LVENCE=17,LCB=18;
+const LO=0,LA=1,LM=2,LC=3,LR=4,LE=5,LMO=6,LADJ=7,LCOD=8,LNOM=9,LF=10,LSUB=11,LADJI=12,LMADJ=13,LFADJ=14,LDUR=15,LRENOV=16,LVENCE=17,LCB=18,LADJR=19;
 let licOrigen=0;
 let compQuery="", adjQuery="", licQuery="";
 let licHorizon=12;
@@ -933,6 +1123,91 @@ document.querySelectorAll("#lic-horizon .subtab").forEach(b=>b.addEventListener(
   licCal();
 }));
 document.getElementById("lic-clearf").addEventListener("click",()=>{F.year="all";F.comp=-1;F.adj=-1;F.sub="";F.reg=-1;licPaint();});
+
+/* ================= Ficha de proveedor ================= */
+function pnorm(s){
+  return norm(s).replace(/[.,]/g," ")
+    .replace(/\b(s a|s\.a|spa|ltda|limitada|e i r l|eirl|y cia|cia|sociedad anonima|s a c|inversiones)\b/g," ")
+    .replace(/\s+/g," ").trim();
+}
+let provSel=null;
+function provList(){
+  const agg={}; DATA.rows.forEach(r=>{agg[r[P]]=(agg[r[P]]||0)+valOf(r);});
+  return Object.entries(agg).map(([k,v])=>({k:Number(k),name:DATA.prov[k]||"—",v})).sort((a,b)=>b.v-a.v);
+}
+function renderProvSelect(q){
+  const ql=(q||"").toLowerCase();
+  let list=provList(); if(ql) list=list.filter(p=>p.name.toLowerCase().includes(ql));
+  document.getElementById("prov-list").innerHTML=list.slice(0,50).map(p=>
+    `<div class="rankrow ${provSel===p.k?'on':''}" onclick="selProv(${p.k})"><span class="nm ${isUCM(p.name)?'ucm':''}" title="${p.name}">${p.name}</span><span class="mn">${short(p.v)}</span></div>`
+  ).join("")||'<span class="note">Sin resultados.</span>';
+}
+function selProv(k){ provSel=k; provPaint(); }
+function provAnnual(rs){
+  const ys=[...new Set(DATA.rows.map(r=>r[A]))].filter(y=>y>0).sort((a,b)=>a-b);
+  const map={}; ys.forEach(y=>map[y]=0); rs.forEach(r=>{ if(map[r[A]]!==undefined) map[r[A]]+=valOf(r); });
+  const data=ys.map(y=>({y,v:map[y]})), max=Math.max(...data.map(d=>d.v),1);
+  const W=1000,H=210,padL=54,padR=10,padT=16,padB=34,plotH=H-padT-padB,bw=(W-padL-padR)/Math.max(data.length,1);
+  let g="";for(let i=0;i<=4;i++){const gy=padT+plotH*i/4;g+=`<g class="grid"><line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}"/><text class="axis" x="${padL-8}" y="${gy+4}" text-anchor="end">${short(max*(1-i/4))}</text></g>`;}
+  let bars="";data.forEach((d,i)=>{const h=plotH*(d.v/max),x=padL+i*bw+bw*0.18,w=bw*0.64,y=H-padB-h;
+    bars+=`<g><rect x="${x}" y="${y}" width="${w}" height="${Math.max(h,0.5)}" rx="4" fill="var(--bright)"><title>${d.y}: ${money(d.v)}</title></rect><text class="barval" x="${x+w/2}" y="${y-5}" text-anchor="middle">${d.v>0?short(d.v):''}</text><text class="axis" x="${x+w/2}" y="${H-padB+16}" text-anchor="middle">${d.y}</text></g>`;});
+  document.getElementById("prov-annual").innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${g}${bars}</svg>`;
+}
+function provMonto(r){ const mo=r[LMADJ]>0?r[LMADJ]:r[LMO]; return unit==="uf"?mo/ufYear(r[LA]):mo; }
+function provWonTable(won){
+  won=won.slice().sort((a,b)=>(b[LFADJ]||"").localeCompare(a[LFADJ]||""));
+  const head=`<thead><tr><th>Código</th><th>Nombre</th><th>Comprador</th><th>Adjud.</th><th class="mon">Monto</th><th>Dur.</th><th>Vence</th></tr></thead>`;
+  const body="<tbody>"+won.slice(0,150).map(r=>`<tr><td class="cod">${r[LCOD]}</td><td>${(r[LNOM]||"").slice(0,50)}</td><td>${(L.comp[r[LC]]||"").slice(0,28)}</td><td>${r[LFADJ]||"—"}</td><td class="mon">${money(provMonto(r))}</td><td>${r[LDUR]?r[LDUR]+" m":"—"}</td><td>${r[LVENCE]||"—"}</td></tr>`).join("")+"</tbody>";
+  document.getElementById("prov-won").innerHTML=head+body;
+  document.getElementById("prov-won-note").textContent=won.length?`${nf.format(won.length)} licitaciones adjudicadas (cruce por RUT del adjudicatario).`:"No se encontraron licitaciones adjudicadas con este nombre.";
+}
+function provPipeline(won){
+  const HOY=new Date().toISOString().slice(0,10);
+  const fut=won.filter(r=>r[LVENCE]&&r[LVENCE]>=HOY).sort((a,b)=>a[LVENCE].localeCompare(b[LVENCE]));
+  const mm=(a,b)=>(b.slice(0,4)-a.slice(0,4))*12+(b.slice(5,7)-a.slice(5,7));
+  const head=`<thead><tr><th>Vence</th><th>En</th><th>Código</th><th>Comprador</th><th class="mon">Monto</th></tr></thead>`;
+  const body="<tbody>"+fut.slice(0,150).map(r=>{const n=mm(HOY,r[LVENCE]);const cls=n<=3?"venc-soon":(n<=6?"venc-mid":"");return `<tr><td class="cod">${r[LVENCE]}</td><td class="${cls}">~${n} m</td><td class="cod">${r[LCOD]}</td><td>${(L.comp[r[LC]]||"").slice(0,30)}</td><td class="mon">${money(provMonto(r))}</td></tr>`;}).join("")+"</tbody>";
+  document.getElementById("prov-pipe").innerHTML=head+body;
+  document.getElementById("prov-pipe-note").textContent=fut.length?`${nf.format(fut.length)} contratos con vencimiento estimado a futuro.`:"Sin vencimientos futuros estimables.";
+}
+function provPaint(){
+  renderProvSelect((document.getElementById("prov-search")||{}).value||"");
+  const body=document.getElementById("prov-body"), empty=document.getElementById("prov-empty");
+  if(provSel===null){ body.hidden=true; empty.hidden=false; return; }
+  body.hidden=false; empty.hidden=true;
+  const pname=DATA.prov[provSel]||"—"; const key=pnorm(pname);
+  const rut=(DATA.provRut&&DATA.provRut[provSel])||"";
+  document.getElementById("prov-name").textContent=pname;
+  const rs=DATA.rows.filter(r=>r[P]===provSel);
+  const total=rs.reduce((s,r)=>s+valOf(r),0);
+  const mkt=DATA.rows.reduce((s,r)=>s+valOf(r),0)||1;
+  const buyers=new Set(rs.map(r=>r[C])).size;
+  const licAll=L.rows.filter(r=>r[LO]===0);
+  const matchProv=(r)=> rut ? r[LADJR]===rut : pnorm(L.adj[r[LADJI]]||"")===key;
+  const won=licAll.filter(r=>r[LADJ]===1 && matchProv(r));
+  let bid=0,winOfe=0;
+  for(const cod in L.ofe){ const me=L.ofe[cod].find(o=> rut ? o.r===rut : pnorm(o.n||"")===key); if(me){ bid++; if(me.s) winOfe++; } }
+  const lost=bid-winOfe, winRate=bid?Math.round(winOfe/bid*100):0;
+  const k=[["Recibido (OC)",short(total),"devengado"],
+    ["Participación",(total/mkt*100).toFixed(2)+"%","del mercado"],
+    ["Licitaciones ganadas",nf.format(won.length),buyers+" compradores"],
+    ["Tasa de éxito",bid?winRate+"%":"—",bid?`${winOfe} de ${bid} ofertas`:"sin datos de ofertas"]];
+  document.getElementById("prov-kpis").innerHTML=k.map(([l,v,s])=>`<div class="kpi"><div class="lab">${l}</div><div class="val">${v}</div><div class="sub">${s}</div></div>`).join("");
+  provAnnual(rs);
+  const ca={}; rs.forEach(r=>{for(let i=0;i<CATS.length;i++){if(r[CB]&(1<<i)){ca[i]=(ca[i]||0)+valOf(r);break;}}});
+  hbars("prov-cats",Object.entries(ca).map(([i,v])=>({name:CATS[i].label,v})).sort((a,b)=>b.v-a.v));
+  const bu={}; rs.forEach(r=>{bu[r[C]]=(bu[r[C]]||0)+valOf(r);});
+  hbars("prov-buyers",Object.entries(bu).map(([kk,v])=>({name:DATA.comp[kk]||"—",v})).sort((a,b)=>b.v-a.v).slice(0,10));
+  document.getElementById("prov-ofertas").innerHTML=
+    `<div class="chips"><div class="chip"><div class="n">${nf.format(bid)}</div><div class="l">licitaciones ofertadas</div></div>`+
+    `<div class="chip"><div class="n est-adj">${nf.format(winOfe)}</div><div class="l">ganadas</div></div>`+
+    `<div class="chip"><div class="n est-des">${nf.format(lost)}</div><div class="l">perdidas</div></div>`+
+    `<div class="chip"><div class="n">${bid?winRate+'%':'—'}</div><div class="l">tasa de éxito</div></div></div>`+
+    `<p class="tblnote">Cruce por RUT contra los oferentes de las licitaciones del mercado (exacto cuando el RUT está disponible).</p>`;
+  provWonTable(won);
+  provPipeline(won);
+}
+document.getElementById("prov-search").addEventListener("input",e=>renderProvSelect(e.target.value));
 </script>
 </body>
 </html>

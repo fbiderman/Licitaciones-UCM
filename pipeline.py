@@ -409,9 +409,14 @@ _ADQ_WORDS = ["adquisicion", "adquuisicion", "reposicion", "compra de ambulancia
               "renovacion de ambulancia", "renovacion ambulancia"]
 _MANT_WORDS = ["mantencion", "mantenimiento", "reparacion"]
 _VEHIC_WORDS = ["ambulancia"]   # SOLO ambulancia (no 'vehiculo'/'movil': traía combustible y equipos)
-# proveedores que son vendedores/carroceros de ambulancias (sus ventas van a Adquisición)
-_VENDEDORES_AMB = ["kauffman", "bertonati", "conversiones san jose", "pena spoerer", "dikar",
-                   "carroceria", "carrocerias", "ecomax", "epysa"]
+# proveedores que son vendedores/carroceros o concesionarias (su negocio general NO es traslado)
+_VENDEDORES_AMB = ["kaufmann", "bertonati", "conversiones san jose", "pena spoerer", "dikar",
+                   "carroceria", "carrocerias", "ecomax", "epysa", "salinas y fabres",
+                   "gildemeister", "technology motor"]
+
+
+def _es_vendedor_amb(proveedor):
+    return any(v in _txtnorm(proveedor) for v in _VENDEDORES_AMB)
 
 
 def _es_adquisicion_amb(n):
@@ -424,7 +429,7 @@ def _es_mantencion_amb(n):
 
 def _es_venta_vendedor(proveedor, nombre):
     """Venta de ambulancia por un vendedor/carrocero conocido (aunque el nombre no diga 'adquisición')."""
-    return any(v in _txtnorm(proveedor) for v in _VENDEDORES_AMB) and "ambulancia" in _txtnorm(nombre)
+    return _es_vendedor_amb(proveedor) and "ambulancia" in _txtnorm(nombre)
 # nombres que NO son traslado (ruido que se cuela por el filtro amplio de OC)
 _NO_TRASLADO = ["examen", "cintigra", "linfocintig", "insumo", "oxigeno", "medicamento", "reactivo",
                 "accesorio", "bougie", "bajada infusion", "equipos medicos", "equipo medico",
@@ -570,6 +575,9 @@ def cmd_build(args):
         monto = float(monto or 0)
         if _oc_no_es_transporte(nom):                    # excluye tratamiento/insumos/exámenes
             continue
+        # concesionaria/vendedor: solo su negocio de ambulancias (nombre con 'ambulancia' o enlazado a licitación)
+        if _es_vendedor_amb(p) and "ambulancia" not in _txtnorm(nom) and not codlic:
+            continue
         if (p or "") not in prov_rut and _rut_norm(rutp):
             prov_rut[p or ""] = _rut_norm(rutp)
         mask = _catmask(nom) | _prov_mask(p)
@@ -578,6 +586,8 @@ def cmd_build(args):
         if codlic and lic_mask.get(codlic):
             mask |= lic_mask[codlic]
         mask = _cat_single(mask)
+        if _es_vendedor_amb(p) and mask == 1:            # una concesionaria no hace traslado: es compra/mantención
+            mask = (1 << _CAT_IDX["mantencion"]) if _es_mantencion_amb(_txtnorm(nom)) else (1 << _CAT_IDX["adquisicion"])
         pi, ci, ri, ei, ti = idx(prov, p), idx(comp, cp), idx(reg, rg), idx(est, es), idx(tip, tp)
         for yy, mm, amt in _prorratea(int(a or 0), int(m or 0), monto, codlic):
             total += amt
@@ -1051,9 +1061,15 @@ def cmd_import_da(args):
                 nom = " ".join(str(row.get(cc, "") or "") for cc in obj_cols_oc)
                 if _oc_no_es_transporte(nom):
                     return False                       # equipamiento/tratamiento/insumo/internet
+                prov = str(row.get(mapa.get("proveedor", ""), "") or "")
+                codlic = str(row.get(mapa.get("codigo_licitacion", ""), "") or "").strip()
+                if _es_vendedor_amb(prov) and "ambulancia" not in _txtnorm(nom) and not codlic:
+                    return False                       # concesionaria: solo su negocio de ambulancias
                 n = _txtnorm(nom)
                 if _es_adquisicion_amb(n) or _es_mantencion_amb(n):
                     return True                        # compra o mantención de ambulancia
+                if _es_venta_vendedor(prov, nom):
+                    return True                        # venta de ambulancia por vendedor conocido
                 cl = _clasificar_traslado(row, obj_cols_oc, onu_cols_oc)
                 if cl in ("servicio", "vehiculo"):     # incluye vehículo (adquisición de ambulancia)
                     return True

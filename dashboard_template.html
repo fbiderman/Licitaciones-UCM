@@ -244,6 +244,10 @@
       <div><h2><span class="dot"></span>El mercado en el tiempo</h2>
         <p class="hint">Monto por año. Haz clic en un año para desglosarlo por mes.</p></div>
       <div style="display:flex;gap:8px;align-items:center">
+        <div class="subtabs" id="annualMode">
+          <button class="subtab on" data-mode="full">Año completo</button>
+          <button class="subtab" data-mode="ytd">Al mes de hoy</button>
+        </div>
         <div class="yearpill" id="yearPill">Todos los años</div>
         <div class="yearpill" id="monthPill" style="display:none;background:#fdeaea;color:var(--red)"></div>
       </div>
@@ -449,14 +453,24 @@ function renderKPIs(){
     `<div class="kpi"><div class="lab">${l}</div><div class="val">${v}</div><div class="sub">${s}</div></div>`).join("");
 }
 
+let annualMode="full";
+const _today=new Date();
+const CUR_Y=_today.getFullYear();
+const CUR_M=_today.getMonth()+1;
+const FRAC_YEAR=Math.max((Math.floor((_today-new Date(CUR_Y,0,0))/86400000))/365, 0.02);
 function renderAnnual(){
   const cats=TIPCATS.filter(c=>!tipOff.has(c));
+  const ytd=(annualMode==="ytd");
   const sums={}, totCat={};
   years.forEach(y=>{ sums[y]={}; TIPCATS.forEach(c=>sums[y][c]=0); });
   TIPCATS.forEach(c=>totCat[c]=0);
-  scopeAnnual().forEach(r=>{ const y=r[A]; if(sums[y]===undefined) return; const cat=catOfTip(r[T]); sums[y][cat]+=valOf(r); totCat[cat]+=valOf(r); });
+  scopeAnnual().forEach(r=>{ if(ytd && r[M]>CUR_M) return; const y=r[A]; if(sums[y]===undefined) return; const cat=catOfTip(r[T]); sums[y][cat]+=valOf(r); totCat[cat]+=valOf(r); });
   const totals=years.map(y=>cats.reduce((s,c)=>s+sums[y][c],0));
-  const max=Math.max(...totals,1);
+  // proyección del año en curso (solo en modo 'año completo')
+  const curIdx=years.indexOf(CUR_Y);
+  let proj=0;
+  if(!ytd && curIdx>=0) proj=totals[curIdx]/FRAC_YEAR;
+  const max=Math.max(...totals, proj, 1);
   const W=1000,H=260, padL=54,padR=10,padT=16,padB=34, plotH=H-padT-padB;
   const bw=(W-padL-padR)/years.length;
   let g="";
@@ -473,17 +487,27 @@ function renderAnnual(){
       segs+=`<rect x="${x}" y="${yy}" width="${w}" height="${Math.max(hh,0.6)}" fill="${TIPCOL[cat]}"><title>${y} · ${cat}: ${money(v)}</title></rect>`;
     });
     const topY=H-padB-acc;
+    // extensión punteada de proyección para el año en curso
+    let projMark="";
+    if(!ytd && y===CUR_Y && proj>tot){
+      const py=H-padB-plotH*(proj/max);
+      projMark=`<rect x="${x}" y="${py}" width="${w}" height="${topY-py}" fill="var(--blue)" fill-opacity="0.14" stroke="var(--blue)" stroke-dasharray="3 2" stroke-width="1"></rect>
+        <text x="${x+w/2}" y="${py-4}" text-anchor="middle" font-size="11" fill="var(--blue)" font-weight="700">proy ${short(proj)}</text>`;
+    }
     bars+=`<g class="bar" tabindex="0" role="button" aria-label="Año ${y}: ${money(tot)}" onclick="selYear(${y})" onkeypress="if(event.key==='Enter')selYear(${y})">
-      ${segs}
+      ${segs}${projMark}
       ${sel?`<rect x="${x-1.5}" y="${topY-1.5}" width="${w+3}" height="${acc+3}" fill="none" stroke="var(--red)" stroke-width="2" rx="3"></rect>`:""}
       <text class="barval" x="${x+w/2}" y="${topY-6}" text-anchor="middle">${short(tot)}</text>
       <text class="axis" x="${x+w/2}" y="${H-padB+16}" text-anchor="middle" style="${sel?'fill:var(--red);font-weight:700':''}">${y}</text>
     </g>`;
   });
+  const nota = ytd
+    ? `Comparación año a la fecha: cada año hasta el mes ${CUR_M}, para comparar manzanas con manzanas.`
+    : `Año completo. El ${CUR_Y} muestra en punteado la proyección a fin de año según el ritmo actual (${Math.round(FRAC_YEAR*100)}% del año transcurrido).`;
   document.getElementById("annual").innerHTML =
     `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Monto por año y tipo de orden">${g}${bars}</svg>
       ${tipLegend(totCat)}
-      <div class="legend"><span>Apilado por tipo de orden · valores en ${unitLabel()}. Haz clic en un tipo para prenderlo o apagarlo, o en un año para filtrar.</span></div>`;
+      <div class="legend"><span>${nota} Valores en ${unitLabel()}.</span></div>`;
 }
 
 function renderMonthly(){
@@ -650,6 +674,12 @@ function toggleCat(i){ catOn[i]=!catOn[i]; if(!catOn.some(x=>x)) catOn[i]=true; 
 document.getElementById("cat-all").addEventListener("click",()=>{ catOn=CATS.map(()=>true); applyCats(); });
 document.getElementById("cat-none").addEventListener("click",()=>{ catOn=CATS.map((_,i)=>i===0); applyCats(); });
 renderCatGrid();
+
+document.querySelectorAll("#annualMode .subtab").forEach(b=>b.addEventListener("click",()=>{
+  annualMode=b.dataset.mode;
+  document.querySelectorAll("#annualMode .subtab").forEach(x=>x.classList.toggle("on",x===b));
+  renderAnnual();
+}));
 
 /* ================= Router de páginas ================= */
 document.querySelectorAll('nav.pages a[data-page]').forEach(a=>{

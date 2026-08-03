@@ -160,6 +160,48 @@ def cmd_resolve(args):
 
 
 # ------------------------------------------------------------------ UPDATE
+def _fx_cache_o_fetch(c, ind, dkey):
+    """Valor del indicador para una fecha: primero la caché fx, si no, la API."""
+    row = c.execute("SELECT valor FROM fx WHERE fecha=? AND indicador=?", (dkey, ind)).fetchone()
+    if row:
+        return float(row[0])
+    try:
+        from mp_api import fetch_indicador
+        v = fetch_indicador(ind, dkey)
+    except Exception:                                  # sin red o sin mp_api: solo caché
+        v = None
+    if v:
+        c.execute("INSERT OR REPLACE INTO fx VALUES (?,?,?)", (dkey, ind, float(v)))
+        return float(v)
+    return None
+
+
+def _fx_interpolar(c, ind, dkey, ventana=15):
+    """Interpola linealmente el indicador entre el día disponible anterior y el posterior."""
+    from datetime import date, timedelta
+    d0 = date.fromisoformat(dkey)
+    prev = nxt = None
+    for i in range(1, ventana + 1):
+        v = _fx_cache_o_fetch(c, ind, (d0 - timedelta(days=i)).isoformat())
+        if v:
+            prev = (i, v); break
+    for i in range(1, ventana + 1):
+        v = _fx_cache_o_fetch(c, ind, (d0 + timedelta(days=i)).isoformat())
+        if v:
+            nxt = (i, v); break
+    if prev and nxt:
+        dp, vp = prev; dn, vn = nxt
+        val = vp + (vn - vp) * dp / (dp + dn)     # interpolación lineal por distancia en días
+        c.execute("INSERT OR REPLACE INTO fx VALUES (?,?,?)", (dkey, ind, val))
+        print(f"  ~ {ind} {dkey} interpolado = {val:.4f} (entre {vp} y {vn})")
+        return val
+    if prev:                                       # solo hay anterior: se arrastra
+        return prev[1]
+    if nxt:                                         # solo hay posterior: se arrastra
+        return nxt[1]
+    return None
+
+
 def _fx_rate(c, moneda: str, fecha_iso: str) -> float:
     """CLP por unidad de moneda en la fecha. CLP=1. Cachea en la tabla fx."""
     from mp_api import indicador_para_moneda, fetch_indicador
@@ -174,7 +216,15 @@ def _fx_rate(c, moneda: str, fecha_iso: str) -> float:
     if val:
         c.execute("INSERT OR REPLACE INTO fx VALUES (?,?,?)", (dkey, ind, val))
         return float(val)
-    print(f"  ! sin tipo de cambio {ind} para {dkey}; se usa 1.0")
+    # sin valor directo: interpolar entre el día anterior y el posterior (nunca 1.0 para UF/UTM)
+    val = _fx_interpolar(c, ind, dkey)
+    if val:
+        return float(val)
+    last = c.execute("SELECT valor FROM fx WHERE indicador=? ORDER BY fecha DESC LIMIT 1", (ind,)).fetchone()
+    if last:
+        print(f"  ! sin {ind} para {dkey} ni vecinos; se usa último conocido {last[0]}")
+        return float(last[0])
+    print(f"  ! sin {ind} para {dkey} y sin datos previos; se usa 1.0")
     return 1.0
 
 
@@ -765,7 +815,8 @@ def cmd_build(args):
             v = None
         if v:
             c.execute("INSERT OR REPLACE INTO fx VALUES (?,?,?)", (fecha_iso, "uf", v)); c.commit()
-        return v
+            return v
+        return _fx_interpolar(c, "uf", fecha_iso)      # sin valor directo: interpola entre vecinos
     cur_year = dt.date.today().year
     hoy_iso = dt.date.today().isoformat()
     uf_by_year = {}

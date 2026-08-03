@@ -439,7 +439,8 @@ _VEHIC_WORDS = ["ambulancia"]   # SOLO ambulancia (no 'vehiculo'/'movil': traía
 # proveedores que son vendedores/carroceros o concesionarias (su negocio general NO es traslado)
 _VENDEDORES_AMB = ["kaufmann", "bertonati", "conversiones san jose", "pena spoerer", "dikar",
                    "carroceria", "carrocerias", "ecomax", "epysa", "salinas y fabres",
-                   "gildemeister", "technology motor", "equitrans"]
+                   "gildemeister", "technology motor", "equitrans", "hvccsa", "hyundai", "grisolia",
+                   "pinar"]
 
 
 def _es_vendedor_amb(proveedor):
@@ -484,7 +485,18 @@ _HARD_NO = ["internet", "satelital", "desfibrilador", "monitor", "camilla", "equ
 # traslado/transporte de NO-pacientes (si no menciona paciente, queda fuera)
 _NO_PACIENTE_OBJ = ["funcionario", "pasajero", "alumno", "estudiante", "escolar", "personal de",
                     "muestra", "residuo", "valija", "correspondencia", "encomienda", "mercader",
-                    "mobiliario", "documento", "equipaje", "insumos", "carga"]
+                    "mobiliario", "documento", "equipaje", "insumos", "carga",
+                    "material educativo", "material didactico", "materiales educativos", "material"]
+# compradores puros de educación (su traslado es de funcionarios/alumnos/material, no pacientes)
+_EDUCACION = ["provincial de educacion", "provincial educacion", "departamento de educacion",
+              "direccion de educacion", "daem", "junji", "fundacion integra", "jardin infantil",
+              "seremi de educacion", "ministerial de educacion", "liceo", "escuela", "universidad",
+              "instituto profesional"]
+
+
+def _es_educacion_no_salud(comprador):
+    c = _txtnorm(comprador)
+    return any(e in c for e in _EDUCACION) and "salud" not in c
 _PAC_WORDS = ["paciente", "usuario", "enfermo", "dializ", "hemodial", "herido", "postrad",
               "ambulancia", "samu", "hosdom", "hospitalizacion domiciliaria", "domiciliar"]
 # ruido "blando": solo si NO hay verbo de transporte
@@ -632,6 +644,11 @@ def cmd_build(args):
     p_evid = {}     # proveedor -> monto con evidencia de traslado de pacientes
     for a, m, p, cp, rg, es, tp, monto, nom, codlic, rutp in rows:
         monto = float(monto or 0)
+        if _rut_norm(rutp) in _EXCLUIR_RUT:              # proveedor excluido por RUT (giro no-transporte)
+            continue
+        if _SOLO_LISTA and _rut_norm(rutp) not in _ALIAS_RUT:
+            continue                                     # modo solo-lista: deja fuera a los no listados
+        p = _alias(p, rutp)                              # nombre unificado por RUT (lista UCM)
         if _oc_no_es_transporte(nom):                    # excluye tratamiento/insumos/exámenes
             p_excl[p] = p_excl.get(p, 0) + monto
             continue
@@ -640,6 +657,10 @@ def cmd_build(args):
             continue
         # prestador de salud (clínica/fundación/corporación): solo si su OC habla de traslado
         if _es_prestador_salud(p) and not any(t in _txtnorm(nom) for t in ("traslado", "transporte", "ambulancia")):
+            continue
+        # comprador puro de educación y la OC no menciona pacientes: es traslado de funcionarios/alumnos/material
+        if _es_educacion_no_salud(cp) and not any(w in _txtnorm(nom) for w in _PAC_WORDS):
+            p_excl[p] = p_excl.get(p, 0) + monto
             continue
         if (p or "") not in prov_rut and _rut_norm(rutp):
             prov_rut[p or ""] = _rut_norm(rutp)
@@ -653,7 +674,10 @@ def cmd_build(args):
         if codlic and lic_mask.get(codlic):
             mask |= lic_mask[codlic]
         mask = _cat_single(mask)
-        if _es_vendedor_amb(p) and mask == 1:            # una concesionaria no hace traslado: es compra/mantención
+        fcid = _FORCE_CAT_RUT.get(_rut_norm(rutp))
+        if fcid and mask == 1:
+            mask = (1 << _CAT_IDX[fcid])                 # redirige su traslado GENERAL (no sus específicas) por RUT
+        elif _es_vendedor_amb(p) and mask == 1:          # una concesionaria no hace traslado: es compra/mantención
             mask = (1 << _CAT_IDX["mantencion"]) if _es_mantencion_amb(_txtnorm(nom)) else (1 << _CAT_IDX["adquisicion"])
         pre.append((int(a or 0), int(m or 0), p, cp, rg, es, tp, monto, mask, codlic))
         p_tot[p] = p_tot.get(p, 0) + monto
@@ -680,6 +704,8 @@ def cmd_build(args):
     out = []
     total = 0
     for a, m, p, cp, rg, es, tp, monto, mask, codlic in pre:
+        if p_tot.get(p, 0) < _MIN_PROV_TOTAL and p not in _LISTADOS:
+            continue                                     # total histórico < $10M (salvo proveedores de tu lista)
         if mask == 1:
             if p_excl.get(p, 0) > 0.5 * (p_excl.get(p, 0) + p_tot.get(p, 0)):
                 continue                                 # proveedor mayormente NO-transporte: su genérica también sale
@@ -777,6 +803,7 @@ def cmd_build(args):
                    fecha_adjudicacion,duracion,duracion_unidad,renovable,oferentes,rut_adjudicatario
             FROM licitacion"""):
         meses = _dur_meses(int(dur) if str(dur or "").strip().lstrip("-").isdigit() else 0, durU)
+        adjn = _alias(adjn, adjrut)                      # nombre unificado por RUT (lista UCM)
         ancla = (fadj or "")[:10] or (fini or "")[:10]
         vence = _add_months(ancla, meses)
         lic_rows.append([
@@ -797,6 +824,7 @@ def cmd_build(args):
                     if ol:
                         for o in ol:
                             o["r"] = _rut_norm(o.get("r"))   # normaliza RUT de cada oferente
+                            o["n"] = _alias(o.get("n"), o["r"])
                         lic_ofe[cod] = ol
                 except (ValueError, TypeError):
                     pass
@@ -924,6 +952,80 @@ def _colnorm(s: str) -> str:
 
 def _rut_norm(s: str) -> str:
     return re.sub(r"[^0-9K]", "", str(s or "").upper())
+
+
+# ---- alias de proveedores por RUT (nombres definidos por UCM) ----
+_ALIAS_RUT_RAW = {
+    "Salud Asistencia": "96.863.010-5", "Help": "96.565.480-1", "Ambulancias Las Lilas": "9.580.114-5",
+    "UCM": "88.670.700-2", "EMI La Serena": "78.781.940-0", "Seguridad y Salud Sur": "77.912.490-8",
+    "IMS Ambulancias": "77.667.566-0", "Oligri SPA": "77.562.308-K",
+    "Salud y Seguridad Lickan Antai": "77.422.607-9", "Ambulancias Wallace": "77.418.797-9",
+    "Ambulancias Urban": "77.188.378-8", "EMT Services Spa": "77.171.609-1",
+    "Ambulancias Medical Progress": "77.107.793-5", "Auxilia": "77.078.150-7",
+    "Ambulancias Falcon Spa": "76.937.322-5", "Ambulancias Vital Red Ñuble": "76.915.243-1",
+    "Senpro": "76.877.450-1", "Ambulancias Temuco Spa": "76.871.816-4",
+    "Clinicas Moviles RDS SpA": "76.867.722-0", "Movicare": "76.847.600-4",
+    "Ambulancias y Rescate Spa": "76.811.235-5", "Traslado Ambulatorio Spa": "76.776.811-7",
+    "Ambulancias CV Salud": "76.725.359-1", "Ambulancias Codigo Azul": "76.720.976-2",
+    "Respuesta Medica del Norte": "76.719.404-8", "Ambulancias Clave 100": "76.652.918-6",
+    "Support Care Ambulancias": "76.633.351-6", "Vera y Hola": "76.572.290-k",
+    "Altamira Consultores Ltda": "76.554.260-k", "Vital Service S.A.": "76.553.631-6",
+    "EMS Lifecare": "76.540.070-8", "Sofimed": "76.532.118-2", "Javier Antipa": "76.511.677-5",
+    "Santa Lucia": "76.489.302-6", "Ambulancias San Felipe": "76.486.171-k",
+    "Ambulancias Medical-Life": "76.479.211-4", "Ambulancias S.O.S Medical": "76.439.569-7",
+    "Ambulancias Life Rescue": "76.437.315-4", "Segurisur Medical": "76.399.177-6",
+    "Ambulancias REM Ltda": "76.378.420-7", "Ambulancias Viña del Mar": "76.340.330-0",
+    "Rescate Familiar": "76.311.376-0", "Ambulancias Patagonia": "76.294.302-6",
+    "Red Nacional de Servicios integrales SpA": "76.279.333-4", "Rescate Tarapaca": "76.251.295-5",
+    "Trasmed SpA": "76.250.804-4", "Transalud Chile": "76.241.573-9",
+    "Ambulancias Monumental": "76.235.809-3", "Ambulancias SAP Rancagua": "76.234.742-3",
+    "Maxicare": "76.232.412-1", "Ambulancias Santiago Limitada": "76.199.233-3",
+    "Life Med": "76.157.848-0", "Clinica Hogar Buena Salud SPA": "76.149.524-0",
+    "Ambulancias Medical Help": "76.136.111-2",
+    "Servicio de Ambulancia y Taslado de Enfermos Spa": "76.113.262-8",
+    "Ambulancias Araucania": "76.110.287-7", "Ambulancias Sur Alianza": "76.073.036-K",
+    "Centro Medico Geovida Ltda": "76.067.258-8", "Suatrans Chile S.A.": "76.047.102-k",
+    "Genesis": "76.023.890-2", "Emergencia Movil SATT": "76.016.372-4", "Rest911": "76.015.696-5",
+    "Ambulancias JM Salud Integral": "7.457.788-1", "Ambulancias Rescate del Sur": "7.100.175-k",
+    "SPE Servicios": "6.733.864-2", "Ambulancias Galaxia": "5.366.407-5",
+    "Ambulancias AHP": "4.733.966-9", "Ambulancias Cruz del Mar": "18.586.134-1",
+    "Ambulancias ATM": "13.314.061-1", "Ambulancias Cruz del Sur": "11.746.718-k",
+    "Ambulancias Santa Fe": "11.650.554-1", "Ambulancias Eben-Ezer": "11.469.355-3",
+    "Ambulancias San Fernando": "10.662.147-0",
+    "ESACHS Transportes": "76.198.822-0", "ESACHS Servicios": "99.579.260-5",
+    "Paramedicos al Rescate": "76.386.528-2",
+    "Ambulancias ADN": "76.118.892-5", "Serendur Ambulancias": "7.966.239-9",
+    "Ambulancias Medisur": "77.848.635-0", "Roberto Bozo": "76.728.147-1",
+}
+_ALIAS_RUT = {_rut_norm(r): alias for alias, r in _ALIAS_RUT_RAW.items()}
+
+# ---- categoría forzada por RUT (para cuando UCM sabe el giro real del proveedor) ----
+# formato: "RUT": "id de categoría" (generico, dialisis, arriendo, urgencia, aislado, programa,
+#                                    aereo, adquisicion, mantencion, decreto80, testeo, vehiculo)
+_FORCE_CAT_RUT_RAW = {
+    "76.228.166-K": "vehiculo",   # Jiménez y Gálvez: transporte en buses y vans, no ambulancia
+    "76.353.461-8": "vehiculo",   # Herman Jonathan Estefano: transporte de pasajeros en buses
+    # "6.733.864-2": "vehiculo",  # ejemplo: SPE Servicios como traslado en vehículos
+}
+_FORCE_CAT_RUT = {_rut_norm(r): cid for r, cid in _FORCE_CAT_RUT_RAW.items()}
+
+# ---- proveedores a excluir por completo, por RUT (no son del mercado de traslado) ----
+# UCM conoce el giro real; el texto de sus OC no basta para descartarlos.
+_EXCLUIR_RUT_RAW = {
+    "71.727.300-1": "Hogar Los Boldos / CROBIOBIO: hospedaje y acogida oncológica, no traslado",
+}
+_EXCLUIR_RUT = {_rut_norm(r) for r in _EXCLUIR_RUT_RAW}
+
+# umbral mínimo: se elimina de la base a proveedores con total histórico de OC bajo este monto
+_MIN_PROV_TOTAL = 10_000_000   # $10.000.000 CLP
+_LISTADOS = set(_ALIAS_RUT_RAW.keys())   # nombres de tu lista: exentos del umbral
+# si True, el panel incluye SOLO a los proveedores de tu lista (deja el resto afuera)
+_SOLO_LISTA = True
+
+
+def _alias(nombre, rut):
+    """Nombre a mostrar: alias UCM si el RUT está en la lista; si no, el nombre original."""
+    return _ALIAS_RUT.get(_rut_norm(rut), nombre)
 
 
 def _mapear_columnas(header):
@@ -1168,6 +1270,9 @@ def cmd_import_da(args):
                     return False                       # concesionaria: solo su negocio de ambulancias
                 if _es_prestador_salud(prov) and not any(t in _txtnorm(nom) for t in ("traslado", "transporte", "ambulancia")):
                     return False                       # clínica/fundación: prestación médica, no traslado
+                compr = str(row.get(mapa.get("comprador", ""), "") or "")
+                if _es_educacion_no_salud(compr) and not any(w in _txtnorm(nom) for w in _PAC_WORDS):
+                    return False                       # educación: traslado de funcionarios/alumnos/material
                 n = _txtnorm(nom)
                 if _es_adquisicion_amb(n) or _es_mantencion_amb(n):
                     return True                        # compra o mantención de ambulancia

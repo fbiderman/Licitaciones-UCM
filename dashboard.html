@@ -116,6 +116,8 @@
   .subtabs{display:flex;gap:8px;margin:8px 0 4px}
   .subtab{font:700 13px var(--body);color:var(--slate);background:#e8eef7;border:0;border-radius:999px;padding:8px 16px;cursor:pointer}
   .subtab.on{background:var(--blue);color:#fff}
+  .tgl{font:700 12px var(--body);color:var(--slate);background:#e8eef7;border:0;border-radius:999px;padding:6px 14px;cursor:pointer}
+  .tgl.on{background:var(--blue);color:#fff}
   .lic-empty{background:var(--card);border-radius:16px;box-shadow:var(--shadow);padding:40px 24px;text-align:center;color:var(--muted)}
   .lic-empty code{background:#eef3f9;padding:2px 7px;border-radius:6px;font-size:12.5px;color:var(--blue)}
   .chips{display:flex;flex-wrap:wrap;gap:10px}
@@ -364,8 +366,15 @@
     </section>
     <section class="card">
       <div class="head"><div><h2><span class="dot"></span>Participación en el tiempo</h2>
-        <p class="hint">Cómo se reparte el mercado entre los principales proveedores, año a año.</p></div></div>
+        <p class="hint">Los 5 mayores proveedores y UCM, año a año.</p></div>
+        <div class="subtabs"><button class="tgl on" id="pt-pct" onclick="setPartTime('pct')">% del mercado</button><button class="tgl" id="pt-monto" onclick="setPartTime('monto')">Monto contratado</button></div>
+      </div>
       <div id="part-time"></div>
+    </section>
+    <section class="card">
+      <div class="head"><div><h2><span class="dot"></span>Concentración del mercado</h2>
+        <p class="hint">Índice HHI año a año. Cuanto más alto, más concentrado está el mercado.</p></div></div>
+      <div id="part-conc"></div>
     </section>
   </section>
 
@@ -392,9 +401,16 @@
       </div>
     </section>
     <section class="card">
-      <div class="head"><div><h2><span class="dot"></span>Compras en el tiempo</h2>
-        <p class="hint">Gasto anual de los principales compradores.</p></div></div>
+      <div class="head"><div><h2><span class="dot"></span>Principales compradores en el tiempo</h2>
+        <p class="hint">Los 5 mayores compradores, año a año. Un punto rojo marca los años en que UCM le vendió.</p></div>
+        <div class="subtabs"><button class="tgl on" id="ct-pct" onclick="setCompTime('pct')">% del mercado</button><button class="tgl" id="ct-monto" onclick="setCompTime('monto')">Monto contratado</button></div>
+      </div>
       <div id="comp-time"></div>
+    </section>
+    <section class="card">
+      <div class="head"><div><h2><span class="dot"></span>Concentración de compradores</h2>
+        <p class="hint">Índice HHI de los compradores año a año. Cuánto concentran los principales organismos.</p></div></div>
+      <div id="comp-conc"></div>
     </section>
   </section>
 
@@ -416,7 +432,9 @@
       <section class="kpis" id="prov-kpis"></section>
       <section class="card">
         <div class="head"><div><h2><span class="dot"></span>Evolución en el tiempo</h2>
-          <p class="hint">Monto recibido por año (devengado).</p></div></div>
+          <p class="hint">Su desempeño año a año (devengado).</p></div>
+          <div class="subtabs"><button class="tgl on" id="pv-monto" onclick="setProvTime('monto')">Monto</button><button class="tgl" id="pv-pct" onclick="setProvTime('pct')">% del mercado</button></div>
+        </div>
         <div id="prov-annual"></div>
       </section>
       <div class="two">
@@ -826,6 +844,85 @@ function stackedByYear(elId,rows,keyIdx,dict,topN){
   document.getElementById(elId).innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${g}${bars}</svg><div class="legend">${leg}</div>`;
 }
 
+/* ===== gráficos "en el tiempo" y concentración (HHI) ===== */
+function multiLine(elId, ys, series, opts){
+  opts=opts||{};
+  const W=1000,H=300,padL=56,padR=12,padT=16,padB=34,plotH=H-padT-padB,plotW=W-padL-padR;
+  let maxv=0; series.forEach(s=>ys.forEach(y=>{maxv=Math.max(maxv,s.vals[y]||0);})); maxv=maxv||1;
+  const xAt=i=>padL+(ys.length<=1?plotW/2:plotW*i/(ys.length-1));
+  const yAt=v=>H-padB-plotH*(v/maxv);
+  const fmtY=v=>opts.pct?(Math.round(v)+"%"):short(v);
+  let g="";
+  for(let i=0;i<=4;i++){const gy=padT+plotH*i/4;g+=`<g class="grid"><line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}"/><text class="axis" x="${padL-8}" y="${gy+4}" text-anchor="end">${fmtY(maxv*(1-i/4))}</text></g>`;}
+  const xl=ys.map((y,i)=>`<text class="axis" x="${xAt(i)}" y="${H-padB+16}" text-anchor="middle">${y}</text>`).join("");
+  let paths="",legend="";
+  series.forEach(s=>{
+    const pts=ys.map((y,i)=>[xAt(i),yAt(s.vals[y]||0)]);
+    const d=pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
+    paths+=`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.ucm?3.4:2}" ${s.ucm?"":'opacity="0.9"'}/>`;
+    pts.forEach((p,i)=>{const y=ys[i],v=s.vals[y]||0; const dot=s.dots&&s.dots.has(y);
+      if(v>0||dot) paths+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${dot?4.6:(s.ucm?3.6:2.6)}" fill="${dot?'#D64545':s.color}" ${dot?'stroke="#fff" stroke-width="1"':''}><title>${y} · ${s.name}: ${opts.pct?(v.toFixed(1)+"%"):money(v)}${dot?' · UCM le vendió':''}</title></circle>`;});
+    legend+=`<span><i style="background:${s.color}"></i>${(s.ucm?"★ ":"")+s.name.slice(0,26)}</span>`;
+  });
+  document.getElementById(elId).innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${g}${xl}${paths}</svg><div class="legend">${legend}</div>`;
+}
+
+function concByYear(elId, rows, keyIdx){
+  const ys=yearsOf();
+  const yr={}; ys.forEach(y=>yr[y]={tot:0,agg:{}});
+  rows.forEach(r=>{const y=r[A]; if(yr[y]===undefined)return; const v=valOf(r); yr[y].tot+=v; yr[y].agg[r[keyIdx]]=(yr[y].agg[r[keyIdx]]||0)+v;});
+  const data=ys.map(y=>{const t=yr[y].tot||0; const h=t?Object.values(yr[y].agg).reduce((s,v)=>s+Math.pow(v/t*100,2),0):0; return {y,h};});
+  const max=Math.max(...data.map(d=>d.h),2600);
+  const W=1000,H=230,padL=56,padR=44,padT=16,padB=34,plotH=H-padT-padB,bw=(W-padL-padR)/Math.max(data.length,1);
+  const col=h=>h<1500?"#22A06B":(h<2500?"#E8A33D":"#D64545");
+  let g="";
+  for(let i=0;i<=4;i++){const gy=padT+plotH*i/4;g+=`<g class="grid"><line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}"/><text class="axis" x="${padL-8}" y="${gy+4}" text-anchor="end">${Math.round(max*(1-i/4))}</text></g>`;}
+  [1500,2500].forEach(b=>{const gy=H-padB-plotH*(b/max);g+=`<line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}" stroke="#8894A6" stroke-dasharray="4 4"/><text class="axis" x="${W-padR+3}" y="${gy+4}" text-anchor="start">${b}</text>`;});
+  let bars="";data.forEach((d,i)=>{const hh=plotH*(d.h/max),x=padL+i*bw+bw*0.22,w=bw*0.56,y=H-padB-hh;
+    bars+=`<g><rect x="${x}" y="${y}" width="${w}" height="${Math.max(hh,0.5)}" rx="3" fill="${col(d.h)}"><title>${d.y} · HHI ${Math.round(d.h)}</title></rect><text class="barval" x="${x+w/2}" y="${y-5}" text-anchor="middle">${Math.round(d.h)}</text><text class="axis" x="${x+w/2}" y="${H-padB+16}" text-anchor="middle">${d.y}</text></g>`;});
+  const leg=`<span><i style="background:#22A06B"></i>Poco concentrado (&lt;1.500)</span><span><i style="background:#E8A33D"></i>Moderado (1.500–2.500)</span><span><i style="background:#D64545"></i>Concentrado (&gt;2.500)</span>`;
+  document.getElementById(elId).innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${g}${bars}</svg><div class="legend">${leg}</div>`;
+}
+
+let partTimeMode="pct";
+function setPartTime(m){ partTimeMode=m; document.getElementById("pt-pct").classList.toggle("on",m==="pct"); document.getElementById("pt-monto").classList.toggle("on",m==="monto"); partTimePaint(); }
+function partTimePaint(){
+  const ys=yearsOf();
+  const totAll={}; base.forEach(r=>{totAll[r[P]]=(totAll[r[P]]||0)+valOf(r);});
+  const ranked=Object.entries(totAll).map(([k,v])=>({k:Number(k),v})).sort((a,b)=>b.v-a.v);
+  let top=ranked.slice(0,5).map(x=>x.k);
+  const ucm=ranked.find(x=>isUCM(DATA.prov[x.k]));
+  if(ucm && !top.includes(ucm.k)) top.push(ucm.k);          // UCM siempre presente
+  const topset=new Set(top);
+  const yearTot={}; ys.forEach(y=>yearTot[y]=0);
+  const per={}; top.forEach(k=>per[k]={});
+  base.forEach(r=>{const y=r[A]; if(yearTot[y]===undefined)return; yearTot[y]+=valOf(r); if(topset.has(r[P])) per[r[P]][y]=(per[r[P]][y]||0)+valOf(r);});
+  const pct=partTimeMode==="pct"; let ci=0;
+  const series=top.map(k=>{const u=isUCM(DATA.prov[k]); const color=u?"#D64545":PALETTE[(ci++)%PALETTE.length];
+    const vals={}; ys.forEach(y=>{const raw=per[k][y]||0; vals[y]=pct?(yearTot[y]?raw/yearTot[y]*100:0):raw;});
+    return {name:DATA.prov[k]||"—",color,vals,ucm:u};});
+  multiLine("part-time",ys,series,{pct});
+  concByYear("part-conc",base,P);
+}
+
+let compTimeMode="pct";
+function setCompTime(m){ compTimeMode=m; document.getElementById("ct-pct").classList.toggle("on",m==="pct"); document.getElementById("ct-monto").classList.toggle("on",m==="monto"); compTimePaint(); }
+function compTimePaint(){
+  const ys=yearsOf();
+  const totAll={}; base.forEach(r=>{totAll[r[C]]=(totAll[r[C]]||0)+valOf(r);});
+  const ranked=Object.entries(totAll).map(([k,v])=>({k:Number(k),v})).sort((a,b)=>b.v-a.v);
+  const top=ranked.slice(0,5).map(x=>x.k); const topset=new Set(top);
+  const yearTot={}; ys.forEach(y=>yearTot[y]=0);
+  const per={},ucmY={}; top.forEach(k=>{per[k]={};ucmY[k]=new Set();});
+  base.forEach(r=>{const y=r[A]; if(yearTot[y]===undefined)return; yearTot[y]+=valOf(r);
+    if(topset.has(r[C])){ per[r[C]][y]=(per[r[C]][y]||0)+valOf(r); if(isUCM(DATA.prov[r[P]])) ucmY[r[C]].add(y); }});
+  const pct=compTimeMode==="pct";
+  const series=top.map((k,i)=>{const vals={}; ys.forEach(y=>{const raw=per[k][y]||0; vals[y]=pct?(yearTot[y]?raw/yearTot[y]*100:0):raw;});
+    return {name:DATA.comp[k]||"—",color:PALETTE[i%PALETTE.length],vals,dots:ucmY[k]};});
+  multiLine("comp-time",ys,series,{pct});
+  concByYear("comp-conc",base,C);
+}
+
 let partYear="all";
 function partScope(){ return base.filter(r=>partYear==="all"||r[A]===partYear); }
 function selPartYear(y){ partYear=y; partPaint(); }
@@ -848,7 +945,7 @@ function partPaint(){
   const restV=arr.filter(a=>!shown.has(a.k)&&!(ucm&&a.k===ucm.k)).reduce((s,a)=>s+a.v,0);
   if(restV>0) pairs.push({name:"Otros proveedores",v:restV,ucm:false});
   hbars("part-rank",pairs);
-  stackedByYear("part-time",base,P,DATA.prov,7);
+  partTimePaint();
 }
 
 let compYear="all", compSel=null;
@@ -881,7 +978,7 @@ function compPaint(){
     const ca={}; sub.forEach(r=>{for(let i=0;i<CATS.length;i++){if(r[CB]&(1<<i)){ca[i]=(ca[i]||0)+valOf(r);break;}}});
     hbars("comp-cats",Object.entries(ca).map(([i,v])=>({name:CATS[i].label,v})).sort((a,b)=>b.v-a.v));
   } else dc.hidden=true;
-  stackedByYear("comp-time",base,C,DATA.comp,7);
+  compTimePaint();
 }
 document.getElementById("comp-clear").addEventListener("click",()=>{compSel=null;compPaint();});
 
@@ -1143,14 +1240,20 @@ function renderProvSelect(q){
   ).join("")||'<span class="note">Sin resultados.</span>';
 }
 function selProv(k){ provSel=k; provPaint(); }
+let provTimeMode="monto";
+function setProvTime(m){ provTimeMode=m; document.getElementById("pv-monto").classList.toggle("on",m==="monto"); document.getElementById("pv-pct").classList.toggle("on",m==="pct"); if(provSel!==null) provAnnual(DATA.rows.filter(r=>r[P]===provSel)); }
 function provAnnual(rs){
   const ys=[...new Set(DATA.rows.map(r=>r[A]))].filter(y=>y>0).sort((a,b)=>a-b);
   const map={}; ys.forEach(y=>map[y]=0); rs.forEach(r=>{ if(map[r[A]]!==undefined) map[r[A]]+=valOf(r); });
-  const data=ys.map(y=>({y,v:map[y]})), max=Math.max(...data.map(d=>d.v),1);
+  const pct=provTimeMode==="pct";
+  const mkt={}; if(pct){ ys.forEach(y=>mkt[y]=0); DATA.rows.forEach(r=>{ if(mkt[r[A]]!==undefined) mkt[r[A]]+=valOf(r); }); }
+  const data=ys.map(y=>({y, v: pct?(mkt[y]?map[y]/mkt[y]*100:0):map[y]}));
+  const max=Math.max(...data.map(d=>d.v),pct?0.5:1);
+  const fmt=v=>pct?(v.toFixed(v<10?1:0)+"%"):short(v);
   const W=1000,H=210,padL=54,padR=10,padT=16,padB=34,plotH=H-padT-padB,bw=(W-padL-padR)/Math.max(data.length,1);
-  let g="";for(let i=0;i<=4;i++){const gy=padT+plotH*i/4;g+=`<g class="grid"><line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}"/><text class="axis" x="${padL-8}" y="${gy+4}" text-anchor="end">${short(max*(1-i/4))}</text></g>`;}
+  let g="";for(let i=0;i<=4;i++){const gy=padT+plotH*i/4;g+=`<g class="grid"><line x1="${padL}" y1="${gy}" x2="${W-padR}" y2="${gy}"/><text class="axis" x="${padL-8}" y="${gy+4}" text-anchor="end">${fmt(max*(1-i/4))}</text></g>`;}
   let bars="";data.forEach((d,i)=>{const h=plotH*(d.v/max),x=padL+i*bw+bw*0.18,w=bw*0.64,y=H-padB-h;
-    bars+=`<g><rect x="${x}" y="${y}" width="${w}" height="${Math.max(h,0.5)}" rx="4" fill="var(--bright)"><title>${d.y}: ${money(d.v)}</title></rect><text class="barval" x="${x+w/2}" y="${y-5}" text-anchor="middle">${d.v>0?short(d.v):''}</text><text class="axis" x="${x+w/2}" y="${H-padB+16}" text-anchor="middle">${d.y}</text></g>`;});
+    bars+=`<g><rect x="${x}" y="${y}" width="${w}" height="${Math.max(h,0.5)}" rx="4" fill="var(--bright)"><title>${d.y}: ${pct?d.v.toFixed(2)+"% del mercado":money(d.v)}</title></rect><text class="barval" x="${x+w/2}" y="${y-5}" text-anchor="middle">${d.v>0?fmt(d.v):''}</text><text class="axis" x="${x+w/2}" y="${H-padB+16}" text-anchor="middle">${d.y}</text></g>`;});
   document.getElementById("prov-annual").innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${g}${bars}</svg>`;
 }
 function provMonto(r){ const mo=r[LMADJ]>0?r[LMADJ]:r[LMO]; return unit==="uf"?mo/ufYear(r[LA]):mo; }

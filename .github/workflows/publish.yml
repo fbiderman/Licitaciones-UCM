@@ -1,0 +1,58 @@
+name: Publicar panel (sin actualizar datos)
+
+# Reconstruye el panel desde la base actual (mp_traslados.db ya commiteada) y lo
+# publica en GitHub Pages, SIN llamar a la API de Mercado Público ni actualizar datos.
+# Úsalo cuando cambiaste pipeline.py o dashboard_template.html y quieres verlo en vivo
+# sin gastar la actualización diaria.
+
+on:
+  workflow_dispatch: {}         # solo ejecución manual desde la pestaña Actions
+
+permissions:
+  contents: write               # commitear dashboard.html regenerado
+  pages: write                  # publicar en GitHub Pages
+  id-token: write               # requerido por deploy-pages
+
+concurrency:                    # comparte el candado con la actualización diaria
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  construir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Reconstruir el panel desde la base actual (sin llamar a la API)
+        run: python pipeline.py build
+
+      - name: Guardar dashboard.html en el repositorio
+        run: |
+          git config user.name  "traslados-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add dashboard.html
+          git commit -m "Publicacion manual $(date -u +%Y-%m-%d) (sin actualizar datos)" || echo "Sin cambios"
+          git push
+
+      - name: Preparar artefacto de Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site           # carpeta con index.html que genera build
+
+  publicar:
+    needs: construir
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Desplegar en GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
